@@ -9,5 +9,19 @@ requests
 PyPDF2
 pypandoc[pandoc]
 python-magic
-pysqlite3-binary
+# pysqlite3-binary
 boto3
+
+matplotlib
+pandas
+seaborn
+
+langchain_teddynote
+langchain_experimental
+langchain_openai
+langchain
+langchain_community
+langchain_core
+langchain_text_splitters
+
+chardet
