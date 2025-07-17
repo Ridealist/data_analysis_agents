@@ -1,5 +1,5 @@
 # Base 이미지
-FROM python:3.12-slim
+FROM python:3.11-slim
 
 # 2. 작업 디렉토리를 /app으로 설정
 WORKDIR /app
@@ -7,7 +7,7 @@ WORKDIR /app
 # 3. 의존성 패키지 설치
 RUN apt-get update && apt-get install -y \
     libmagic1 \
-    build-essential \
+    build-essential cmake python3-dev \
     curl \
     software-properties-common \
     git \
@@ -17,11 +17,11 @@ RUN apt-get update && apt-get install -y \
 # 4-1. 현재 디렉토리의 requirements.txt 파일을 컨테이너의 /app으로 복사
 COPY requirements.txt /app/
 
-# 4-2. requirements.txt에 명시된 패키지 설치
-RUN pip3 install --upgrade pip
+RUN pip install numpy cython   
 
 # 4-2. requirements.txt에 명시된 패키지 설치
-RUN pip3 install -r requirements.txt
+RUN pip3 install --upgrade pip setuptools wheel
+RUN pip3 install --no-cache-dir -r requirements.txt
 
 # 4-3. reinstall python-magic
 RUN pip install --upgrade python-magic

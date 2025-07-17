@@ -1,20 +1,14 @@
-crewai
-crewai-tools
-streamlit
-exa-py
-requests
-# unstructured
-# unstructured-inference
-# pysqlite3
+numpy
+pandas
+matplotlib
+seaborn
+
 PyPDF2
 pypandoc[pandoc]
 python-magic
-# pysqlite3-binary
+streamlit
+requests
 boto3
-
-matplotlib
-pandas
-seaborn
 
 langchain_teddynote
 langchain_experimental
@@ -23,5 +17,3 @@ langchain
 langchain_community
 langchain_core
 langchain_text_splitters
-
-chardet
