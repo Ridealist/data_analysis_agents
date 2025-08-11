@@ -2,6 +2,7 @@ from langchain.tools import tool
 from typing import Annotated, Optional
 from langchain_experimental.tools.python.tool import PythonAstREPLTool
 import pandas as pd
+import numpy as np
 import seaborn as sns
 from langchain_core.prompts import ChatPromptTemplate, load_prompt
 from langchain_openai import ChatOpenAI
@@ -48,9 +49,9 @@ class DataAnalysisAgent:
     def create_python_repl_tool(self):
         @tool
         def python_repl_tool(
-            code: Annotated[str, "Any python code(pandas, matplotlib, seaborn) to run"],
+            code: Annotated[str, "Any python code(pandas, numpy, matplotlib, seaborn) to run"],
         ):
-            """Use this tool to run python, pandas query, matplotlib, and seaborn code."""
+            """Use this tool to run python, pandas, numpy, matplotlib, and seaborn code."""
             try:
                 #### 폰트 설정
                 # 먼저 시스템에서 사용 가능한 한글 폰트 찾기 (안전한 방식)
@@ -108,37 +109,51 @@ class DataAnalysisAgent:
                         python_tool.locals['df_SchoolFood'] = self.df
                     python_tool.locals['sns'] = sns
                     python_tool.locals['plt'] = plt
+                    python_tool.locals['np'] = np
+                    python_tool.locals['pd'] = pd
                 else:
                     python_tool = PythonAstREPLTool(
-                        locals={"df": self.df, "df_SchoolFood": self.df, "sns": sns, "plt": plt}
+                        locals={"df": self.df, "df_SchoolFood": self.df, "sns": sns, "plt": plt, "np": np, "pd": pd}
                     )
 
                 result = python_tool.invoke(code)
 
-                # result_df가 생성되었는지 확인하고 세션 상태에 저장
-                if 'result_df' in python_tool.locals:
-                    result_df = python_tool.locals['result_df']
-                    if isinstance(result_df, pd.DataFrame) or isinstance(result_df, pd.Series):
-                        # Streamlit 세션 상태에 저장
-                        if 'last_result_df' not in st.session_state:
-                            st.session_state['last_result_df'] = None
-                        st.session_state['last_result_df'] = result_df
-                        print(f"[DataAnalysisAgent] result_df saved to session state: shape={result_df.shape if hasattr(result_df, 'shape') else len(result_df)}")
+                # 실행 후 locals를 다시 확인하여 result_df 캡처
+                # result_df 또는 result로 명명된 변수 찾기
+                for var_name in ['result_df', 'result', 'output_df', 'final_df']:
+                    if var_name in python_tool.locals:
+                        var_value = python_tool.locals[var_name]
+                        if isinstance(var_value, (pd.DataFrame, pd.Series)):
+                            if 'last_result_df' not in st.session_state:
+                                st.session_state['last_result_df'] = None
+                            st.session_state['last_result_df'] = var_value
+                            print(f"[DataAnalysisAgent] result_df saved to session state: shape={var_value.shape if hasattr(var_value, 'shape') else len(var_value)}")                        
+                            break
+                        else:
+                            print(f"[DataAnalysisAgent] {var_name} exists but is not DataFrame or Series: type={type(var_value)}")
+                    else:
+                        print(f"[DataAnalysisAgent] No {var_name} found in python_tool.locals")
 
-                # 시각화 코드가 있으면 figure를 저장만 하고 직접 출력하지 않음
+
+                # 시각화 코드가 실행된 후 figure가 실제로 생성되었는지 확인
                 if any(keyword in code for keyword in ["plt.", "sns.", "matplotlib", "seaborn"]):
                     fig = plt.gcf()
-                    if fig and fig.axes:
+                    # figure가 유효하고 axes가 있는지 확인 (실제로 그래프가 그려졌는지)
+                    if fig and hasattr(fig, 'axes') and fig.axes and len(fig.axes) > 0:
                         # figure를 세션 상태에 저장 (ask 함수에서 출력)
-                        st.session_state['last_figure'] = fig
-                        print("[DataAnalysisAgent] Figure saved to session state")
-                        # 중요: 여기서 직접 출력하지 않음!
-                        # st.pyplot(fig) <- 제거
-                    # plt.close()는 ask 함수에서 처리하지 않음 (메모리 누수 방지)
+                        st.session_state['last_figure'] = fig                  
+                        print(f"[DataAnalysisAgent] Figure saved to session state: {fig}")
+                    else:
+                        print("[DataAnalysisAgent] Figure exists but no data plotted")
+                else:
+                    print("[DataAnalysisAgent] No visualization keywords found in code")
 
                 return result
-            
+
             except Exception as e:
+                import traceback
+                error_detail = traceback.format_exc()
+                print(f"[DataAnalysisAgent Error] {error_detail}")
                 return f"Execution failed. Error: {repr(e)}"
 
         return python_repl_tool

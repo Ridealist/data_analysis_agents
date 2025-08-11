@@ -1,10 +1,9 @@
 from typing import List, Union
 from langchain_experimental.tools import PythonAstREPLTool
-from langchain_teddynote import logging
-from langchain_teddynote.messages import AgentStreamParser, AgentCallbacks
 from dotenv import load_dotenv
 import streamlit as st
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import os
@@ -18,21 +17,11 @@ from langchain_core.messages import AIMessageChunk
 from langchain_openai import ChatOpenAI
 from langchain_teddynote.prompts import load_prompt
 # from langchain_teddynote.messages import stream_response  # 스트리밍 출력
+# from langchain_teddynote import logging # 로깅 설정
+
 
 # 경고 메시지 숨기기
 warnings.filterwarnings('ignore')
-
-
-##### Streamlit 시각화 설정 #####
-def _st_show(*args, **kwargs):
-    """plt.show()를 Streamlit-friendly 버전으로 교체"""
-    # ❶ 스트림릿 시작 직후(예: import 뒤)에 넣어두기
-    fig = plt.gcf()
-    if fig and fig.axes:
-        st.pyplot(fig)
-    plt.close(fig)           # 메모리 누수 방지
-
-plt.show = _st_show        # 원 함수 오버라이드
 
 
 ##### API 키 및 프로젝트 설정 #####
@@ -62,10 +51,16 @@ if "messages_sidebar_SchoolFood" not in st.session_state:
     # 대화기록을 저장하기 위한 용도로 생성한다.
     st.session_state["messages_sidebar_SchoolFood"] = []
 
+if "uploaded_data" not in st.session_state:
+    st.session_state["uploaded_data"] = None
 
-# 데이터 로딩
-FILE_PATH_SchoolFood = "data/school_food.csv"
+# 데이터 로딩 (기본값)
+FILE_PATH_SchoolFood = "data/school_food_cut.csv"
 LOADED_DATA_SchoolFood = pd.read_csv(FILE_PATH_SchoolFood, index_col=0)
+
+# 업로드된 파일이 있으면 해당 데이터를 사용
+if st.session_state["uploaded_data"] is not None and isinstance(st.session_state["uploaded_data"], pd.DataFrame):
+    LOADED_DATA_SchoolFood = st.session_state["uploaded_data"]
 
 
 # 상수 정의
@@ -87,6 +82,7 @@ class MessageType:
     FIGURE = "figure"  # 그림 메시지
     CODE = "code"  # 코드 메시지
     DATAFRAME = "dataframe"  # 데이터프레임 메시지
+
 
 # 체인 생성
 @st.cache_resource
@@ -178,8 +174,8 @@ def tool_callback(tool) -> None:
                     st.session_state["python_tool"].invoke({"query": safe_code})
 
                     # 생성된 figure 출력
-                    fig = plt.gcf()
-                    if fig and fig.axes:
+                    fig = st.session_state["last_figure"]
+                    if isinstance(fig, plt.Figure):
                         st.pyplot(fig)
                         add_message_main(MessageRole.ASSISTANT, [MessageType.FIGURE, fig])
                     plt.close(fig)
@@ -274,7 +270,7 @@ def ask(query):
     if 'result_df' in python_tool.locals:
         del python_tool.locals['result_df']
     st.session_state['last_result_df'] = None
-    # st.session_state['last_figure'] = None  # figure 초기화 제거
+    st.session_state['last_figure'] = None
 
     # Agent 실행
     with st.spinner("AI가 생각하고 있습니다..."):
@@ -313,8 +309,8 @@ def ask(query):
             fig = st.session_state['last_figure']
             st.pyplot(fig)
             add_message_main(MessageRole.ASSISTANT, [MessageType.FIGURE, fig])
-            # plt.close(fig)  # 메모리 정리 - 제거
-            # st.session_state['last_figure'] = None  # 사용 후 초기화 - 제거
+            plt.close(fig)  # 메모리 정리
+            st.session_state['last_figure'] = None  # 사용 후 초기화
 
         # 4. 텍스트 답변
         ai_answer = ""
@@ -340,109 +336,144 @@ else:
 
 # 사이드바 설정
 with st.sidebar:
-    clear_btn = st.button("메인 윈도우 대화 초기화 ➡️")  # 대화 내용을 초기화하는 버튼
+    uploaded_file = st.file_uploader("파일 업로드", type=["csv"], help="학교 급식 데이터를 업로드해주세요.")
+    data_add_btn = st.button("분석 데이터 적용 ➡️", key="data_add_btn")  # 업로드된 데이터를 분석용으로 적용
+    
+    if uploaded_file is not None:
+        try:
+            dataframe = pd.read_csv(uploaded_file)
+            st.session_state["uploaded_data"] = dataframe
+            st.success("새로운 데이터를 확인했습니다! '분석 데이터 적용' 버튼을 클릭해주세요.")
+        except Exception as e:
+            st.error(f"파일 읽기 오류: {str(e)}")
+            st.session_state["uploaded_data"] = None
 
-#     st.text("추천질문")
-#     st.text("(추천 질문을 참고해 오른쪽 메인 화면에서 데이터 분석을 요청해보세요.)")
-#     col1, col2 = st.columns(2)
-#     placeholder1 = col1.empty()
-#     placeholder2 = col2.empty()
+    # st.text("추천질문")
+    # st.text("(추천 질문을 참고해 오른쪽 메인 화면에서 데이터 분석을 요청해보세요.)")
+    # col1, col2 = st.columns(2)
+    # placeholder1 = col1.empty()
+    # placeholder2 = col2.empty()
 
-#     st.text("AI와 대화하기")
-#     messages = st.container(height=400)
+    # st.text("AI와 대화하기")
+    # messages = st.container(height=400)
 
-#     # 이전 대화를 출력
-#     def print_messages_sidebar():
-#         for chat_message in st.session_state["messages_sidebar_SchoolFood"]:
-#             messages.chat_message(chat_message.role).write(chat_message.content)
+    # # 이전 대화를 출력
+    # def print_messages_sidebar():
+    #     for chat_message in st.session_state["messages_sidebar_SchoolFood"]:
+    #         messages.chat_message(chat_message.role).write(chat_message.content)
 
-#     # 새로운 메시지를 추가
-#     def add_message_sidebar(role, message):
-#         st.session_state["messages_sidebar_SchoolFood"].append(ChatMessage(role=role, content=message))
+    # # 새로운 메시지를 추가
+    # def add_message_sidebar(role, message):
+    #     st.session_state["messages_sidebar_SchoolFood"].append(ChatMessage(role=role, content=message))
 
-#     # 키워드 질문 처리
-#     kw_1, kw_2 = create_keyword(st.session_state["messages_sidebar_SchoolFood"])
-#     kw_button_1 = placeholder1.button(label=kw_1, use_container_width=True, help="클릭하면 또 다른 질문이 생성돼요")
-#     kw_button_2 = placeholder2.button(label=kw_2, use_container_width=True, help="클릭하면 또 다른 질문이 생성돼요")
+    # # 키워드 질문 처리
+    # kw_1, kw_2 = create_keyword(st.session_state["messages_sidebar_SchoolFood"])
+    # kw_button_1 = placeholder1.button(label=kw_1, use_container_width=True, help="클릭하면 또 다른 질문이 생성돼요")
+    # kw_button_2 = placeholder2.button(label=kw_2, use_container_width=True, help="클릭하면 또 다른 질문이 생성돼요")
 
-#     # 사용자의 입력
-#     user_input = st.chat_input("🤓분석도우미에게 궁금한 내용을 물어보세요!")
+    # # 사용자의 입력
+    # user_input = st.chat_input("🤓분석도우미에게 궁금한 내용을 물어보세요!")
 
-#     # 대화 chain 설정
-#     chain = st.session_state["df_chain_SchoolFood"]
+    # # 대화 chain 설정
+    # chain = st.session_state["df_chain_SchoolFood"]
 
-#     # 이전 대화 기록 출력
-#     print_messages_sidebar()
+    # # 이전 대화 기록 출력
+    # print_messages_sidebar()
 
-#     # 만약에 사용자 입력이 들어오면...
-#     if user_input:
-#         # 사용자의 입력
-#         messages.chat_message("user").write(user_input)
+    # # 만약에 사용자 입력이 들어오면...
+    # if user_input:
+    #     # 사용자의 입력
+    #     messages.chat_message("user").write(user_input)
 
-#         input = {
-#             "context": column_info,
-#             "question": user_input
-#         }
+    #     input = {
+    #         "context": column_info,
+    #         "question": user_input
+    #     }
 
-#         # 답변 스트리밍 호출
-#         response = chain.stream(input)
+    #     # 답변 스트리밍 호출
+    #     response = chain.stream(input)
 
-#         with messages.chat_message("assistant"):
-#             # 빈 공간(컨테이너)을 만들어서, 여기에 토큰을 스트리밍 출력한다.
-#             container = st.empty()
+    #     with messages.chat_message("assistant"):
+    #         # 빈 공간(컨테이너)을 만들어서, 여기에 토큰을 스트리밍 출력한다.
+    #         container = st.empty()
 
-#             ai_answer = ""
-#             for token in response:
-#                 if isinstance(token, AIMessageChunk):
-#                     ai_answer += token.content
-#                 elif isinstance(token, str):
-#                     ai_answer += token
-#                 container.markdown(ai_answer)
+    #         ai_answer = ""
+    #         for token in response:
+    #             if isinstance(token, AIMessageChunk):
+    #                 ai_answer += token.content
+    #             elif isinstance(token, str):
+    #                 ai_answer += token
+    #             container.markdown(ai_answer)
 
-#         # 대화기록을 저장한다.
-#         add_message_sidebar("user", user_input)
-#         add_message_sidebar("assistant", ai_answer)
+    #     # 대화기록을 저장한다.
+    #     add_message_sidebar("user", user_input)
+    #     add_message_sidebar("assistant", ai_answer)
 
-#         kw_1, kw_2 = create_keyword(st.session_state["messages_sidebar_SchoolFood"])
-#         placeholder1.button(label=kw_1, use_container_width=True)
-#         placeholder2.button(label=kw_2, use_container_width=True)
+    #     kw_1, kw_2 = create_keyword(st.session_state["messages_sidebar_SchoolFood"])
+    #     placeholder1.button(label=kw_1, use_container_width=True)
+    #     placeholder2.button(label=kw_2, use_container_width=True)
 
 # 메인 로직
-if clear_btn:
-    st.session_state["messages_SchoolFood"] = []  # 대화 내용 초기화
-    # figure 메모리 정리
-    if 'last_figure' in st.session_state and st.session_state['last_figure'] is not None:
-        try:
-            plt.close(st.session_state['last_figure'])
-        except:
-            pass
-        st.session_state['last_figure'] = None
+if uploaded_file is not None and data_add_btn:
+    # 업로드된 파일이 있고, 유효한 데이터프레임인 경우에만 처리
+    if st.session_state["uploaded_data"] is not None and isinstance(st.session_state["uploaded_data"], pd.DataFrame):
+        st.session_state["messages_SchoolFood"] = []  # 대화 내용 초기화
+        st.session_state["last_result_df"] = None
+        st.session_state["last_figure"] = None
+        st.session_state["data_applied"] = True  # 데이터 적용 상태 표시
+        st.success("✅ 새로운 데이터가 적용되었습니다! '데이터 분석 시작' 버튼을 클릭해주세요.")
+        st.rerun()
+    else:
+        st.warning("⚠️ 먼저 유효한 CSV 파일을 업로드해주세요.")
+else:
+    # 업로드된 파일이 없거나 버튼을 누르지 않은 경우
+    pass
+
 
 apply_btn = st.button("데이터 분석 시작", type="primary")  # 데이터 분석을 시작하는 버튼
 
 if apply_btn:
-    loaded_data = LOADED_DATA_SchoolFood
+    # 업로드된 데이터가 있으면 사용, 없으면 기본 데이터 사용
+    if st.session_state.get("data_applied", False) and "uploaded_data" in st.session_state and st.session_state["uploaded_data"] is not None:
+        loaded_data = st.session_state["uploaded_data"]
+        st.info("📁 **업로드된 데이터**로 분석을 시작합니다.")
+    else:
+        loaded_data = LOADED_DATA_SchoolFood
+        st.info("📁 **기본 데이터**로 분석을 시작합니다.")
+    
+    # 데이터 분석 시작 전 상태 초기화
+    st.session_state["messages_SchoolFood"] = []
+    st.session_state["last_result_df"] = None
+    st.session_state["last_figure"] = None
     
     # 데이터 정보 표시 (한글로)
-    st.info(f"📊 데이터 로딩 완료: {loaded_data.shape[0]}개 음식 항목, {loaded_data.shape[1]}개 컬럼")
-    st.info("컬럼 정보: 음식종류, 메뉴명, 배식량, 잔반량, 섭취량")
+    st.success(f"📊 데이터 로딩 완료: **{loaded_data.shape[0]}개 항목**, **{loaded_data.shape[1]}개 피처**")
+    st.success(f"컬럼 정보: **{', '.join(loaded_data.columns.tolist())}**")
     
     # 초기 데이터프레임 표시
-    st.subheader("📋 학교 급식 데이터 미리보기")    
+    st.subheader("📋 학교 급식 데이터 보기")
     add_message_main(MessageRole.ASSISTANT, [MessageType.DATAFRAME, loaded_data.head(10)])
 
     # 세션 상태에 저장
     st.session_state["df_SchoolFood"] = loaded_data
     st.session_state["python_tool"] = PythonAstREPLTool() # Python 실행 도구 생성
     st.session_state["last_result_df"] = None
-    # st.session_state["last_figure"] = None  # figure 초기화 제거
+    st.session_state["last_figure"] = None
 
     # Python 실행 도구 생성 (중요: 하나만 생성)
     st.session_state["python_tool"].locals["df_SchoolFood"] = loaded_data  # 데이터프레임을 Python 실행 환경에 추가
     st.session_state["python_tool"].locals["df"] = loaded_data  # df로도 접근 가능하게 추가
     st.session_state["python_tool"].locals["pd"] = pd  # pandas 추가
+    st.session_state["python_tool"].locals["np"] = np  # numpy 추가
     st.session_state["python_tool"].locals["plt"] = plt  # matplotlib 추가
     st.session_state["python_tool"].locals["sns"] = sns  # seaborn 추가
+    
+    # 데이터프레임 정보도 추가
+    st.session_state["python_tool"].locals["data_info"] = {
+        "shape": loaded_data.shape,
+        "columns": loaded_data.columns.tolist(),
+        "dtypes": loaded_data.dtypes.to_dict()
+    }
 
     # Agent 생성 - 같은 python_tool 사용하도록
     st.session_state["agent_SchoolFood"] = create_agent(
@@ -458,26 +489,54 @@ if apply_btn:
 **중요한 시각화 규칙**:
 - 그래프를 그릴 때는 한글 폰트 설정을 하지 마세요 (plt.rcParams['font.family'] = ... 금지)
 - 한글 폰트는 이미 전역으로 설정되어 있으니 바로 matplotlib과 seaborn을 사용하세요
-- 시각화 코드에서 폰트 관련 설정은 절대 포함하지 마세요""",
+- 시각화 코드에서 폰트 관련 설정은 절대 포함하지 마세요
+
+**중요한 코드 작성 규칙**:
+- 함수를 정의할 때 함수 외부의 변수를 참조하지 마세요
+- 함수 내부에서 필요한 모든 변수를 정의하거나 파라미터로 전달하세요
+- apply() 함수를 사용할 때는 가능한 람다 함수를 사용하세요
+- 예시:
+  # 잘못된 방법:
+  # keywords = ['a', 'b']
+  # def check(x):
+  #     return any(k in x for k in keywords)  # 외부 변수 참조
+  
+  # 올바른 방법 1 - 함수 내부 정의:
+  # def check(x):
+  #     keywords = ['a', 'b']  # 함수 내부에 정의
+  #     return any(k in x for k in keywords)
+  
+  # 올바른 방법 2 - 람다 사용:
+  # df['col'].apply(lambda x: '분류1' if 'a' in x else '분류2')""",
         postfix_prompt="""
 <출력 형식>
 분석 결과를 설명할 때는 다음 형식을 따라주세요:
 
 - **핵심 내용**: (한 줄로 핵심 내용을 요약해주세요)
 - **상세 설명**: (핵심 내용에 대한 상세 설명을 3문장이 넘지 않게, 중학생이 이해하기 쉽게 구체적으로 설명해주세요)
-- **다음 분석 추천**: (이어서 분석해보면 좋을 내용을 최대 3가지만 추천해주세요)
-   - 각 추천은 구체적이고 실행 가능한 분석이어야 합니다
-   - 예: "○○별로 비교해보기", "△△와 ◇◇의 관계 알아보기" 등
 
 답변은 친근하고 격려하는 톤으로 작성해주세요.
 </출력 형식>""",
         shared_python_tool=st.session_state.get("python_tool", None),  # 중요: 같은 도구 전달
     )  # 에이전트 생성
 
-    st.success("설정이 완료되었습니다. 대화를 시작해 주세요!")
-
+    
 print_messages_main()  # 저장된 메시지 출력
 
 user_input = st.chat_input("데이터에 질문해보세요!")  # 사용자 입력 받기
 if user_input:
     ask(user_input)  # 사용자 질문 처리
+
+
+# 사이드바 하단에 현재 데이터 상태 표시
+with st.sidebar:
+    st.markdown("---")
+    
+    # 현재 데이터 상태 표시
+    if st.session_state.get("data_applied", False):
+        st.info("✅ 업로드된 데이터 사용 중")
+        if "uploaded_data" in st.session_state and st.session_state["uploaded_data"] is not None:
+            st.caption(f"데이터 크기: {st.session_state['uploaded_data'].shape[0]}행 × {st.session_state['uploaded_data'].shape[1]}열")
+    else:
+        st.info("📁 기본 데이터 사용 중")
+        st.caption(f"데이터 크기: {LOADED_DATA_SchoolFood.shape[0]}행 × {LOADED_DATA_SchoolFood.shape[1]}열")
