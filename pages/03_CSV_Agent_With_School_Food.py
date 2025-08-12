@@ -18,8 +18,9 @@ from langchain_core.output_parsers import StrOutputParser
 
 from langchain_openai import ChatOpenAI
 from langchain_teddynote.prompts import load_prompt
+from langchain_teddynote import logging # 로깅 설정
 # from langchain_teddynote.messages import stream_response  # 스트리밍 출력
-# from langchain_teddynote import logging # 로깅 설정
+
 
 # 데이터베이스 관련 import
 from db.dynamo import DynamoDBManager, S3Manager, ConversationManager, MessageManager, timestamp_to_datetime
@@ -38,11 +39,11 @@ DEFAULT_SIDEBAR_TUTOR_MODEL = "gpt-4o-mini"
 DEFAULT_DATA_ANALYSIS_MODEL = "gpt-4.1"
 
 ## LangSmith 세팅 (주석 처리)
-# os.environ["LANGCHAIN_TRACING_V2"] = st.secrets["LANGCHAIN_TRACING_V2"]
-# os.environ["LANGCHAIN_API_KEY"] = st.secrets["LANGCHAIN_API_KEY"]
-# os.environ["LANGCHAIN_ENDPOINT"] = st.secrets["LANGCHAIN_ENDPOINT"]
-# os.environ["LANGCHAIN_PROJECT"] = st.secrets["LANGCHAIN_PROJECT"]
-# logging.langsmith("CSV Agent 챗봇 학교급식 0717")
+os.environ["LANGCHAIN_TRACING_V2"] = st.secrets["LANGCHAIN_TRACING_V2"]
+os.environ["LANGCHAIN_API_KEY"] = st.secrets["LANGCHAIN_API_KEY"]
+os.environ["LANGCHAIN_ENDPOINT"] = st.secrets["LANGCHAIN_ENDPOINT"]
+os.environ["LANGCHAIN_PROJECT"] = st.secrets["LANGCHAIN_PROJECT"]
+logging.langsmith("Agent 챗봇 학교급식[창의성] 0813")
 
 # --- 데이터베이스 설정 ---
 AWS_ACCESS_KEY_ID = st.secrets.get("AWS_ACCESS_KEY_ID")
