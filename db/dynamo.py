@@ -1,0 +1,526 @@
+import boto3
+from boto3.dynamodb.conditions import Key, Attr
+from botocore.exceptions import NoCredentialsError, ClientError
+import pandas as pd
+import io
+import traceback
+import uuid
+from datetime import datetime, timezone
+from typing import Optional, Dict, Any, List
+from decimal import Decimal
+import streamlit as st
+
+class DynamoDBManager:
+    """DynamoDB 관리 클래스"""
+    
+    def __init__(self, aws_access_key_id: str, aws_secret_access_key: str, 
+                 region_name: str, conversations_table: str, messages_table: str):
+        """
+        DynamoDB 매니저 초기화
+        
+        Args:
+            aws_access_key_id: AWS 액세스 키
+            aws_secret_access_key: AWS 시크릿 키
+            region_name: AWS 리전
+            conversations_table: 대화 테이블 이름
+            messages_table: 메시지 테이블 이름
+        """
+        self.aws_access_key_id = aws_access_key_id
+        self.aws_secret_access_key = aws_secret_access_key
+        self.region_name = region_name
+        self.conversations_table_name = conversations_table
+        self.messages_table_name = messages_table
+        
+        # DynamoDB 리소스 초기화
+        self.dynamodb = boto3.resource(
+            'dynamodb',
+            aws_access_key_id=aws_access_key_id,
+            aws_secret_access_key=aws_secret_access_key,
+            region_name=region_name
+        )
+        
+        # 테이블 참조
+        self.conversations_table = self.dynamodb.Table(conversations_table)
+        self.messages_table = self.dynamodb.Table(messages_table)
+        
+        # 테이블 초기화
+        self.create_tables_if_not_exists()
+    
+    def create_tables_if_not_exists(self):
+        """DynamoDB 테이블이 없으면 생성"""
+        existing_tables = [table.name for table in self.dynamodb.tables.all()]
+        
+        # Conversations 테이블
+        if self.conversations_table_name not in existing_tables:
+            try:
+                self.dynamodb.create_table(
+                    TableName=self.conversations_table_name,
+                    KeySchema=[
+                        {'AttributeName': 'session_uuid', 'KeyType': 'HASH'}
+                    ],
+                    AttributeDefinitions=[
+                        {'AttributeName': 'session_uuid', 'AttributeType': 'S'},
+                        {'AttributeName': 'user_id', 'AttributeType': 'S'},
+                        {'AttributeName': 'created_at', 'AttributeType': 'N'}
+                    ],
+                    GlobalSecondaryIndexes=[
+                        {
+                            'IndexName': 'user_id-created_at-index',
+                            'KeySchema': [
+                                {'AttributeName': 'user_id', 'KeyType': 'HASH'},
+                                {'AttributeName': 'created_at', 'KeyType': 'RANGE'}
+                            ],
+                            'Projection': {'ProjectionType': 'ALL'}
+                        }
+                    ],
+                    BillingMode='PAY_PER_REQUEST'
+                )
+                print(f"Created table {self.conversations_table_name}")
+            except ClientError as e:
+                if e.response['Error']['Code'] != 'ResourceInUseException':
+                    raise
+        
+        # Messages 테이블
+        if self.messages_table_name not in existing_tables:
+            try:
+                self.dynamodb.create_table(
+                    TableName=self.messages_table_name,
+                    KeySchema=[
+                        {'AttributeName': 'conversation_id', 'KeyType': 'HASH'},
+                        {'AttributeName': 'timestamp', 'KeyType': 'RANGE'}
+                    ],
+                    AttributeDefinitions=[
+                        {'AttributeName': 'conversation_id', 'AttributeType': 'S'},
+                        {'AttributeName': 'timestamp', 'AttributeType': 'N'}
+                    ],
+                    BillingMode='PAY_PER_REQUEST'
+                )
+                print(f"Created table {self.messages_table_name}")
+            except ClientError as e:
+                if e.response['Error']['Code'] != 'ResourceInUseException':
+                    raise
+
+class S3Manager:
+    """S3 관리 클래스"""
+    
+    def __init__(self, aws_access_key_id: str, aws_secret_access_key: str, 
+                 region_name: str, bucket_name: str):
+        """
+        S3 매니저 초기화
+        
+        Args:
+            aws_access_key_id: AWS 액세스 키
+            aws_secret_access_key: AWS 시크릿 키
+            region_name: AWS 리전
+            bucket_name: S3 버킷 이름
+        """
+        self.bucket_name = bucket_name
+        self.s3_client = boto3.client(
+            's3',
+            aws_access_key_id=aws_access_key_id,
+            aws_secret_access_key=aws_secret_access_key,
+            region_name=region_name
+        )
+    
+    def upload_to_s3(self, data, content_type: str, conversation_id: str, use_jpeg: bool = False) -> Optional[str]:
+        """
+        데이터를 S3에 업로드하고 파일 경로를 반환
+        
+        Args:
+            data: 업로드할 데이터
+            content_type: 'dataframe' 또는 'figure'
+            conversation_id: 대화 ID (S3 루트 폴더로 사용)
+            use_jpeg: figure의 경우 JPEG 사용 여부 (기본값: False = PNG 사용)
+        
+        Returns:
+            str: S3 객체 키 또는 None (실패 시)
+        """
+        try:
+            timestamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
+            unique_id = str(uuid.uuid4())[:8]  # UUID의 앞 8자리만 사용
+            
+            if content_type == 'dataframe':
+                # CSV 파일로 저장
+                file_extension = 'csv'
+                object_name = f"{conversation_id}/dataframes/{timestamp}_{unique_id}.{file_extension}"
+                
+                buffer = io.StringIO()
+                data.to_csv(buffer, index=False)
+                buffer.seek(0)
+                
+                self.s3_client.put_object(
+                    Bucket=self.bucket_name,
+                    Key=object_name,
+                    Body=buffer.getvalue(),
+                    ContentType='text/csv',
+                    Metadata={
+                        'upload_timestamp': timestamp,
+                        'content_type': 'dataframe',
+                        'conversation_id': conversation_id
+                    }
+                )
+                
+            elif content_type == 'figure':
+                # PNG 또는 JPEG 이미지로 저장
+                if use_jpeg:
+                    file_extension = 'jpg'
+                    image_format = 'jpeg'
+                    mime_type = 'image/jpeg'
+                else:
+                    file_extension = 'png'
+                    image_format = 'png'
+                    mime_type = 'image/png'
+                
+                object_name = f"{conversation_id}/figures/{timestamp}_{unique_id}.{file_extension}"
+                
+                buffer = io.BytesIO()
+                # PNG는 투명도 지원, JPEG는 더 작은 파일 크기
+                if use_jpeg:
+                    # JPEG는 투명도를 지원하지 않으므로 흰색 배경 추가
+                    data.savefig(buffer, format=image_format, dpi=100, 
+                               bbox_inches='tight', facecolor='white', quality=85)
+                else:
+                    data.savefig(buffer, format=image_format, dpi=100, 
+                               bbox_inches='tight', transparent=True)
+                buffer.seek(0)
+                
+                self.s3_client.put_object(
+                    Bucket=self.bucket_name,
+                    Key=object_name,
+                    Body=buffer,
+                    ContentType=mime_type,
+                    Metadata={
+                        'upload_timestamp': timestamp,
+                        'content_type': 'figure',
+                        'image_format': image_format,
+                        'conversation_id': conversation_id
+                    }
+                )
+            else:
+                return None
+                
+            return object_name
+            
+        except NoCredentialsError:
+            st.error("AWS 자격 증명을 찾을 수 없습니다.")
+            return None
+        except Exception as e:
+            st.error(f"S3 업로드 오류: {e}")
+            traceback.print_exc()
+            return None
+    
+    def download_from_s3(self, object_name: str, content_type: str):
+        """
+        S3에서 파일을 다운로드하여 객체로 변환
+        
+        Args:
+            object_name: S3 객체 키
+            content_type: 콘텐츠 타입 ('dataframe_s3' 또는 'figure_s3')
+        
+        Returns:
+            DataFrame 또는 BytesIO 객체 또는 None (실패 시)
+        """
+        try:
+            obj = self.s3_client.get_object(Bucket=self.bucket_name, Key=object_name)
+            body = obj['Body']
+            
+            if content_type == 'dataframe_s3':
+                csv_string = body.read().decode('utf-8')
+                return pd.read_csv(io.StringIO(csv_string))
+            elif content_type == 'figure_s3':
+                img_data = body.read()
+                img_buffer = io.BytesIO(img_data)
+                img_buffer.seek(0)
+                return img_buffer
+                
+        except Exception as e:
+            st.error(f"S3 다운로드 오류: {e}")
+            traceback.print_exc()
+            return None
+    
+    def get_file_info_from_s3(self, object_name: str) -> Dict[str, Any]:
+        """
+        S3 객체의 메타데이터 가져오기
+        
+        Args:
+            object_name: S3 객체 키
+        
+        Returns:
+            dict: 파일 정보 (크기, 콘텐츠 타입, 수정 시간, 메타데이터)
+        """
+        try:
+            response = self.s3_client.head_object(Bucket=self.bucket_name, Key=object_name)
+            return {
+                'size': response['ContentLength'],
+                'content_type': response['ContentType'],
+                'last_modified': response['LastModified'],
+                'metadata': response.get('Metadata', {})
+            }
+        except Exception as e:
+            return {}
+    
+    def delete_from_s3(self, object_name: str) -> bool:
+        """
+        S3에서 파일 삭제
+        
+        Args:
+            object_name: S3 객체 키
+        
+        Returns:
+            bool: 삭제 성공 여부
+        """
+        try:
+            self.s3_client.delete_object(Bucket=self.bucket_name, Key=object_name)
+            return True
+        except Exception as e:
+            st.error(f"S3 삭제 오류: {e}")
+            return False
+
+class ConversationManager:
+    """대화 관리 클래스"""
+    
+    def __init__(self, dynamo_manager: DynamoDBManager):
+        """
+        대화 매니저 초기화
+        
+        Args:
+            dynamo_manager: DynamoDB 매니저 인스턴스
+        """
+        self.dynamo_manager = dynamo_manager
+        self.conversations_table = dynamo_manager.conversations_table
+        self.messages_table = dynamo_manager.messages_table
+    
+    def get_or_create_conversation(self, session_uuid: str, user_id: Optional[str] = None) -> Optional[Dict]:
+        """
+        대화 세션 생성 또는 조회
+        
+        Args:
+            session_uuid: 세션 UUID
+            user_id: 사용자 ID
+        
+        Returns:
+            dict: 대화 정보 또는 None (실패 시)
+        """
+        try:
+            response = self.conversations_table.get_item(Key={'session_uuid': session_uuid})
+            
+            if 'Item' in response:
+                return response['Item']
+            else:
+                # 새 대화 생성
+                now = datetime.now(timezone.utc)
+                conversation_item = {
+                    'session_uuid': session_uuid,
+                    'user_id': user_id or 'anonymous',
+                    'topic': '새 대화',
+                    'created_at': self._datetime_to_timestamp(now),
+                    'updated_at': self._datetime_to_timestamp(now)
+                }
+                self.conversations_table.put_item(Item=conversation_item)
+                return conversation_item
+        except Exception as e:
+            st.error(f"대화 생성/조회 오류: {e}")
+            return None
+    
+    def get_user_conversations(self, user_id: str) -> List[Dict]:
+        """
+        사용자의 모든 대화 조회
+        
+        Args:
+            user_id: 사용자 ID
+        
+        Returns:
+            list: 대화 목록
+        """
+        try:
+            response = self.conversations_table.query(
+                IndexName='user_id-created_at-index',
+                KeyConditionExpression=Key('user_id').eq(user_id),
+                ScanIndexForward=False  # 최신순 정렬
+            )
+            return response.get('Items', [])
+        except Exception as e:
+            st.error(f"대화 목록 조회 오류: {e}")
+            return []
+    
+    def update_conversation_topic(self, session_uuid: str, topic: str):
+        """
+        대화 주제 업데이트
+        
+        Args:
+            session_uuid: 세션 UUID
+            topic: 새로운 주제
+        """
+        try:
+            self.conversations_table.update_item(
+                Key={'session_uuid': session_uuid},
+                UpdateExpression='SET topic = :topic, updated_at = :now',
+                ExpressionAttributeValues={
+                    ':topic': topic,
+                    ':now': self._datetime_to_timestamp(datetime.now(timezone.utc))
+                }
+            )
+        except Exception as e:
+            st.error(f"주제 업데이트 오류: {e}")
+    
+    def delete_conversation(self, session_uuid: str, s3_manager: S3Manager) -> bool:
+        """
+        대화 및 관련 메시지 삭제
+        
+        Args:
+            session_uuid: 세션 UUID
+            s3_manager: S3 매니저 인스턴스
+        
+        Returns:
+            bool: 삭제 성공 여부
+        """
+        try:
+            # 메시지 먼저 삭제 (S3 파일 포함)
+            msg_response = self.messages_table.query(
+                KeyConditionExpression=Key('conversation_id').eq(session_uuid)
+            )
+            
+            for msg in msg_response.get('Items', []):
+                # S3 파일 삭제
+                if msg.get('content_type') in ['dataframe_s3', 'figure_s3']:
+                    try:
+                        s3_manager.delete_from_s3(msg['content'])
+                    except:
+                        pass
+                
+                # 메시지 삭제
+                self.messages_table.delete_item(
+                    Key={
+                        'conversation_id': session_uuid,
+                        'timestamp': msg['timestamp']
+                    }
+                )
+            
+            # 대화 삭제
+            self.conversations_table.delete_item(Key={'session_uuid': session_uuid})
+            return True
+        except Exception as e:
+            st.error(f"대화 삭제 오류: {e}")
+            return False
+    
+    def _datetime_to_timestamp(self, dt: datetime) -> Decimal:
+        """datetime을 DynamoDB timestamp(Decimal)로 변환"""
+        return Decimal(str(dt.timestamp()))
+
+class MessageManager:
+    """메시지 관리 클래스"""
+    
+    def __init__(self, dynamo_manager: DynamoDBManager):
+        """
+        메시지 매니저 초기화
+        
+        Args:
+            dynamo_manager: DynamoDB 매니저 인스턴스
+        """
+        self.dynamo_manager = dynamo_manager
+        self.conversations_table = dynamo_manager.conversations_table
+        self.messages_table = dynamo_manager.messages_table
+    
+    def load_messages(self, conversation_id: str) -> List[Dict]:
+        """
+        대화 메시지 로드
+        
+        Args:
+            conversation_id: 대화 ID
+        
+        Returns:
+            list: 메시지 목록
+        """
+        try:
+            response = self.messages_table.query(
+                KeyConditionExpression=Key('conversation_id').eq(conversation_id),
+                ScanIndexForward=True  # 시간순 정렬
+            )
+            
+            messages = []
+            for item in response.get('Items', []):
+                messages.append({
+                    'role': item['role'],
+                    'content_type': item['content_type'],
+                    'content': item['content'],
+                    'timestamp': self._timestamp_to_datetime(item['timestamp'])
+                })
+            return messages
+        except Exception as e:
+            st.error(f"메시지 로드 오류: {e}")
+            return []
+    
+    def save_message(self, conversation_id: str, role: str, content_type: str, content: str) -> bool:
+        """
+        메시지 저장
+        
+        Args:
+            conversation_id: 대화 ID
+            role: 메시지 역할 (user/assistant)
+            content_type: 콘텐츠 타입
+            content: 메시지 내용
+        
+        Returns:
+            bool: 저장 성공 여부
+        """
+        try:
+            now = datetime.now(timezone.utc)
+            message_item = {
+                'conversation_id': conversation_id,
+                'timestamp': self._datetime_to_timestamp(now),
+                'message_id': str(uuid.uuid4()),
+                'role': role,
+                'content_type': content_type,
+                'content': content
+            }
+            self.messages_table.put_item(Item=message_item)
+            
+            # 대화 업데이트 시간 갱신
+            self.conversations_table.update_item(
+                Key={'session_uuid': conversation_id},
+                UpdateExpression='SET updated_at = :now',
+                ExpressionAttributeValues={
+                    ':now': self._datetime_to_timestamp(now)
+                }
+            )
+            
+            # 첫 사용자 메시지인 경우 토픽 자동 설정
+            if role == "user" and content_type == "text":
+                msg_count = self.messages_table.query(
+                    KeyConditionExpression=Key('conversation_id').eq(conversation_id),
+                    FilterExpression=Attr('role').eq('user'),
+                    Select='COUNT'
+                )
+                if msg_count.get('Count', 0) == 1:
+                    topic = content[:50] + ("..." if len(content) > 50 else "")
+                    # ConversationManager 인스턴스가 필요하므로 여기서는 직접 업데이트
+                    self.conversations_table.update_item(
+                        Key={'session_uuid': conversation_id},
+                        UpdateExpression='SET topic = :topic',
+                        ExpressionAttributeValues={
+                            ':topic': topic
+                        }
+                    )
+            
+            return True
+        except Exception as e:
+            st.error(f"메시지 저장 오류: {e}")
+            traceback.print_exc()
+            return False
+    
+    def _datetime_to_timestamp(self, dt: datetime) -> Decimal:
+        """datetime을 DynamoDB timestamp(Decimal)로 변환"""
+        return Decimal(str(dt.timestamp()))
+    
+    def _timestamp_to_datetime(self, timestamp: Decimal) -> datetime:
+        """DynamoDB timestamp를 datetime으로 변환"""
+        return datetime.fromtimestamp(float(timestamp))
+
+# 유틸리티 함수들
+def datetime_to_timestamp(dt: datetime) -> Decimal:
+    """datetime을 DynamoDB timestamp(Decimal)로 변환"""
+    return Decimal(str(dt.timestamp()))
+
+def timestamp_to_datetime(timestamp: Decimal) -> datetime:
+    """DynamoDB timestamp를 datetime으로 변환"""
+    return datetime.fromtimestamp(float(timestamp))
