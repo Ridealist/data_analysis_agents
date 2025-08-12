@@ -8,17 +8,21 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import os
 import warnings
+import json
+import time
+import uuid
+import io
+from datetime import datetime, timezone
 
-# from src.components.keywords import create_keyword
-# from langchain_core.messages.chat import ChatMessage
 from langchain_core.output_parsers import StrOutputParser
-# from langchain_core.messages import AIMessageChunk
 
 from langchain_openai import ChatOpenAI
 from langchain_teddynote.prompts import load_prompt
 # from langchain_teddynote.messages import stream_response  # 스트리밍 출력
 # from langchain_teddynote import logging # 로깅 설정
 
+# 데이터베이스 관련 import
+from db.dynamo import DynamoDBManager, S3Manager, ConversationManager, MessageManager, timestamp_to_datetime
 
 # 경고 메시지 숨기기
 warnings.filterwarnings('ignore')
@@ -40,6 +44,51 @@ DEFAULT_DATA_ANALYSIS_MODEL = "gpt-4.1"
 # os.environ["LANGCHAIN_PROJECT"] = st.secrets["LANGCHAIN_PROJECT"]
 # logging.langsmith("CSV Agent 챗봇 학교급식 0717")
 
+# --- 데이터베이스 설정 ---
+AWS_ACCESS_KEY_ID = st.secrets.get("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = st.secrets.get("AWS_SECRET_ACCESS_KEY")
+AWS_S3_BUCKET_NAME = st.secrets.get("AWS_S3_BUCKET_NAME")
+AWS_REGION = st.secrets.get("AWS_REGION", "ap-northeast-2")
+
+# DynamoDB 테이블 이름
+CONVERSATIONS_TABLE = st.secrets.get("DYNAMODB_CONVERSATIONS_TABLE", "chatbot_conversations")
+MESSAGES_TABLE = st.secrets.get("DYNAMODB_MESSAGES_TABLE", "chatbot_messages")
+
+#--------------------------------#
+#         매니저 초기화         #
+#--------------------------------#
+@st.cache_resource
+def init_managers():
+    """AWS 매니저들을 초기화하고 캐시"""
+    try:
+        # DynamoDB 매니저 초기화
+        dynamo_manager = DynamoDBManager(
+            aws_access_key_id=AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+            region_name=AWS_REGION,
+            conversations_table=CONVERSATIONS_TABLE,
+            messages_table=MESSAGES_TABLE
+        )
+        
+        # S3 매니저 초기화
+        s3_manager = S3Manager(
+            aws_access_key_id=AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+            region_name=AWS_REGION,
+            bucket_name=AWS_S3_BUCKET_NAME
+        )
+        
+        # 대화 및 메시지 매니저 초기화
+        conversation_manager = ConversationManager(dynamo_manager)
+        message_manager = MessageManager(dynamo_manager)
+        
+        return dynamo_manager, s3_manager, conversation_manager, message_manager
+    except Exception as e:
+        st.error(f"매니저 초기화 실패: {e}")
+        return None, None, None, None
+
+# 매니저 인스턴스 가져오기
+dynamo_manager, s3_manager, conversation_manager, message_manager = init_managers()
 
 #--------------------------------#
 #         Streamlit Session State         #
@@ -60,6 +109,13 @@ if "uploaded_data" not in st.session_state:
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
 
+# 데이터베이스 관련 세션 상태 추가
+if "session_uuid" not in st.session_state:
+    st.session_state.session_uuid = str(uuid.uuid4())
+
+if "conversation_id" not in st.session_state:
+    st.session_state.conversation_id = None
+
 # 데이터 로딩 (기본값)
 FILE_PATH_SchoolFood = "data/school_food_cut.csv"
 LOADED_DATA_SchoolFood = pd.read_csv(FILE_PATH_SchoolFood, index_col=0)
@@ -69,7 +125,10 @@ if st.session_state["uploaded_data"] is not None and isinstance(st.session_state
     LOADED_DATA_SchoolFood = st.session_state["uploaded_data"]
 
 
-# 상수 정의
+#--------------------------------#
+#         클래스 정의           #
+#--------------------------------#
+
 class MessageRole:
     """
     메시지 역할을 정의하는 클래스입니다.
@@ -88,9 +147,12 @@ class MessageType:
     FIGURE = "figure"  # 그림 메시지
     CODE = "code"  # 코드 메시지
     DATAFRAME = "dataframe"  # 데이터프레임 메시지
+    ERROR = "error"  # 에러 메시지
 
 
-# 체인 생성
+#--------------------------------#
+#      체인 생성 함수         #
+#--------------------------------#
 @st.cache_resource
 def create_chain(prompt_path="prompts/general_gpto3.yaml", model_name=DEFAULT_SIDEBAR_TUTOR_MODEL):
     # 단계 6: 프롬프트 생성(Create Prompt)
@@ -108,46 +170,115 @@ def create_chain(prompt_path="prompts/general_gpto3.yaml", model_name=DEFAULT_SI
 
     return chain
 
-# 메시지 관련 함수
+#--------------------------------#
+#      메시지 관련 함수         #
+#--------------------------------#
+
+# S3 경로 확인 함수는 현재 사용되지 않음
+# def is_s3_path(content):
+#     """콘텐츠가 S3 경로인지 확인"""
+#     return isinstance(content, str) and content.startswith(st.session_state.get('conversation_id', ''))
+
+# DB 읽기 기능은 지원하지 않음 (요구사항: 저장만 지원)
+# def load_messages_from_db():
+#     """DB에서 메시지를 로드하여 세션 상태에 저장"""
+#     # 이번 버전에서는 DB 읽기 기능을 지원하지 않습니다.
+#     pass
+
+def add_message_main(role: MessageRole, content: List[Union[MessageType, str]]):
+    """새로운 메시지를 저장하는 함수 (DB 연동)"""
+    message_type, message_content = content
+    
+    # DB 저장용 변수
+    db_content_type = None
+    db_content = None
+    
+    # S3 업로드 및 DB 저장 처리
+    if st.session_state.conversation_id:
+        if message_type == MessageType.DATAFRAME and isinstance(message_content, (pd.DataFrame, pd.Series)):
+            # DataFrame을 S3에 업로드
+            s3_path = s3_manager.upload_to_s3(
+                message_content, 
+                'dataframe', 
+                st.session_state.conversation_id
+            )
+            if s3_path:
+                db_content_type = 'dataframe_s3'
+                db_content = s3_path
+                # DB에만 S3 경로 저장, 세션에는 원본 객체 유지
+        
+        elif message_type == MessageType.FIGURE and hasattr(message_content, 'savefig'):
+            # Figure를 S3에 업로드
+            s3_path = s3_manager.upload_to_s3(
+                message_content,
+                'figure',
+                st.session_state.conversation_id
+            )
+            if s3_path:
+                db_content_type = 'figure_s3'
+                db_content = s3_path
+                # DB에만 S3 경로 저장, 세션에는 원본 객체 유지
+        
+        elif message_type == MessageType.TEXT:
+            db_content_type = 'text'
+            db_content = message_content
+        
+        elif message_type == MessageType.CODE:
+            db_content_type = 'code'
+            db_content = message_content
+        
+        elif message_type == MessageType.ERROR:
+            db_content_type = 'error'
+            db_content = message_content
+        
+        # DB에 저장
+        if db_content_type and db_content:
+            message_manager.save_message(
+                st.session_state.conversation_id,
+                role,
+                db_content_type,
+                db_content
+            )
+    
+    # 세션 상태에는 원본 객체 그대로 저장 (S3 경로가 아닌)
+    messages = st.session_state["messages_SchoolFood"]
+    if messages and messages[-1][0] == role:
+        messages[-1][1].extend([content])
+    else:
+        messages.append([role, [content]])
+
 def print_messages_main():
-    """
-    저장된 메시지를 화면에 출력하는 함수입니다.
-    """
+    """저장된 메시지를 화면에 출력하는 함수"""
     for role, content_list in st.session_state["messages_SchoolFood"]:
         with st.chat_message(role):
             for content in content_list:
                 if isinstance(content, list):
                     message_type, message_content = content
+                    
                     if message_type == MessageType.TEXT:
-                        st.markdown(message_content)  # 텍스트 메시지 출력
+                        st.markdown(message_content)
+                    
                     elif message_type == MessageType.FIGURE:
-                        st.pyplot(message_content)  # 그림 메시지 출력
+                        # 로컬 Figure 객체만 출력
+                        st.pyplot(message_content)
+                    
                     elif message_type == MessageType.CODE:
                         with st.status("코드 출력", expanded=False):
-                            st.code(
-                                message_content, language="python"
-                            )  # 코드 메시지 출력
+                            st.code(message_content, language="python")
+                    
                     elif message_type == MessageType.DATAFRAME:
-                        st.dataframe(message_content)  # 데이터프레임 메시지 출력
+                        # 로컬 DataFrame 객체만 출력
+                        st.dataframe(message_content, use_container_width=True)
+                    
+                    elif message_type == MessageType.ERROR:
+                        # ERROR 타입은 화면에 출력하지 않고 pass
+                        pass
                 else:
                     raise ValueError(f"알 수 없는 콘텐츠 유형: {content}")
 
-
-def add_message_main(role: MessageRole, content: List[Union[MessageType, str]]):
-    """
-    새로운 메시지를 저장하는 함수입니다.
-
-    Args:
-        role (MessageRole): 메시지 역할 (사용자 또는 어시스턴트)
-        content (List[Union[MessageType, str]]): 메시지 내용
-    """
-    messages = st.session_state["messages_SchoolFood"]
-    if messages and messages[-1][0] == role:
-        messages[-1][1].extend([content])  # 같은 역할의 연속된 메시지는 하나로 합칩니다
-    else:
-        messages.append([role, [content]])  # 새로운 역할의 메시지는 새로 추가합니다
-
-
+#--------------------------------#
+#         콜백 함수             #
+#--------------------------------#
 # 콜백 함수
 def tool_callback(tool) -> None:
     """
@@ -188,7 +319,9 @@ def tool_callback(tool) -> None:
                 
                 except Exception as e:
                     # 시각화 관련 오류는 사용자에게 치명적이지 않으므로 로그만 남김
+                    error_msg = f"시각화 처리 중 오류 발생: {str(e)}"
                     print(f"[tool_callback:figure] {e}")
+                    add_message_main(MessageRole.ASSISTANT, [MessageType.ERROR, error_msg])
 
 
 def observation_callback(observation) -> None:
@@ -205,7 +338,8 @@ def observation_callback(observation) -> None:
         if isinstance(obs, str):
             # 에러가 아닌 경우 DataFrame 출력일 가능성 확인
             if "Error" in obs:
-                st.error(obs)
+                # 에러 메시지를 ERROR 타입으로 저장 (화면에는 표시하지 않음)
+                add_message_main(MessageRole.ASSISTANT, [MessageType.ERROR, obs])
                 if st.session_state["messages_SchoolFood"]:
                     st.session_state["messages_SchoolFood"][-1][1].clear()  # 에러 발생 시 마지막 메시지 삭제
 
@@ -220,7 +354,10 @@ def result_callback(result: str) -> None:
     pass  # 현재는 아무 동작도 하지 않습니다
 
 
-# 에이전트 생성 함수
+#--------------------------------#
+#      에이전트 생성 함수       #
+#--------------------------------#
+
 def create_agent(
     dataframe,
     selected_model=DEFAULT_DATA_ANALYSIS_MODEL,
@@ -254,7 +391,9 @@ def create_agent(
     )
 
 
-# 질문 처리 함수
+#--------------------------------#
+#       질문 처리 함수          #
+#--------------------------------#
 def ask(query):
     """
     사용자의 질문을 처리하고 응답을 생성하는 함수입니다.
@@ -263,7 +402,9 @@ def ask(query):
         query (str): 사용자의 질문
     """
     if "agent_SchoolFood" not in st.session_state:
-        st.error("먼저 '데이터 분석 시작' 버튼을 클릭해주세요.")
+        error_msg = "먼저 '데이터 분석 시작' 버튼을 클릭해주세요."
+        st.error(error_msg)
+        add_message_main(MessageRole.ASSISTANT, [MessageType.ERROR, error_msg])
         return
 
     st.chat_message("user").write(query)
@@ -333,6 +474,21 @@ def ask(query):
 #         Service Part         #
 #--------------------------------#
 
+# 로그인 처리
+# secrets.toml에서 사용자 정보 가져오기
+users_info = st.secrets["users"]
+
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+
+if "logged_in" not in st.session_state or st.session_state.logged_in == False:
+    st.error(f"👤 로그인이 필요합니다!")
+    time.sleep(1.0)
+    st.switch_page("pages/00_Main.py")
+
+#--------------------------------#
+#         Login 된 이후 로직         #
+#--------------------------------#
 if st.session_state["logged_in"]:
 
     # Main 레이아웃
@@ -345,11 +501,54 @@ if st.session_state["logged_in"]:
         if "df_chain_SchoolFood" not in st.session_state:
             st.session_state["df_chain_SchoolFood"] = df_chain
     else:
-        st.error("데이터 로딩에 실패했습니다. 파일을 확인해주세요.")
+        error_msg = "데이터 로딩에 실패했습니다. 파일을 확인해주세요."
+        st.error(error_msg)
+        add_message_main(MessageRole.ASSISTANT, [MessageType.ERROR, error_msg])
         st.stop()
 
     # 사이드바 설정
     with st.sidebar:
+        # ### 대화 기록 섹션
+        # st.header("대화 기록")
+        
+        # # 새 대화 시작 버튼
+        # if st.button("➕ 새 대화 시작", use_container_width=True):
+        #     st.session_state.session_uuid = str(uuid.uuid4())
+        #     st.session_state.conversation_id = None
+        #     st.session_state["messages_SchoolFood"] = []
+        #     st.rerun()
+
+        # st.divider()
+
+        # # 대화 목록 표시 (사용자 ID가 있는 경우)
+        # if hasattr(st.session_state, 'username'):
+        #     try:
+        #         conversations = conversation_manager.get_user_conversations(st.session_state.username)
+                
+        #         for convo in conversations:
+        #             # 현재 보고 있는 대화 강조
+        #             button_type = "primary" if convo['session_uuid'] == st.session_state.conversation_id else "secondary"
+                    
+        #             col1, col2 = st.columns([0.8, 0.2])
+        #             with col1:
+        #                 if st.button(f"{convo['topic']} ({timestamp_to_datetime(convo['created_at']).strftime('%y-%m-%d %H:%M')})", 
+        #                             key=f"convo_{convo['session_uuid']}", use_container_width=True, type=button_type):
+        #                     st.session_state.session_uuid = convo['session_uuid']
+        #                     st.session_state.conversation_id = convo['session_uuid']
+        #                     st.rerun()
+        #             with col2:
+        #                 if st.button("🗑️", key=f"del_{convo['session_uuid']}"):
+        #                     conversation_manager.delete_conversation(convo['session_uuid'], s3_manager)
+        #                     if st.session_state.conversation_id == convo['session_uuid']:
+        #                         st.session_state.session_uuid = str(uuid.uuid4())
+        #                         st.session_state.conversation_id = None
+        #                     st.rerun()
+        #     except Exception as e:
+        #         st.error(f"대화 목록 로드 실패: {e}")
+
+        
+        ### 파일 업로드 섹션
+        st.header("📁 데이터 업로드")
         uploaded_file = st.file_uploader("파일 업로드", type=["csv"], help="학교 급식 데이터를 업로드해주세요.")
         data_add_btn = st.button("분석 데이터 적용 ➡️", key="data_add_btn")  # 업로드된 데이터를 분석용으로 적용
         
@@ -359,75 +558,12 @@ if st.session_state["logged_in"]:
                 st.session_state["uploaded_data"] = dataframe
                 st.success("새로운 데이터를 확인했습니다! '분석 데이터 적용' 버튼을 클릭해주세요.")
             except Exception as e:
-                st.error(f"파일 읽기 오류: {str(e)}")
+                error_msg = f"파일 읽기 오류: {str(e)}"
+                st.error(error_msg)
+                add_message_main(MessageRole.ASSISTANT, [MessageType.ERROR, error_msg])
                 st.session_state["uploaded_data"] = None
 
-        # st.text("추천질문")
-        # st.text("(추천 질문을 참고해 오른쪽 메인 화면에서 데이터 분석을 요청해보세요.)")
-        # col1, col2 = st.columns(2)
-        # placeholder1 = col1.empty()
-        # placeholder2 = col2.empty()
-
-        # st.text("AI와 대화하기")
-        # messages = st.container(height=400)
-
-        # # 이전 대화를 출력
-        # def print_messages_sidebar():
-        #     for chat_message in st.session_state["messages_sidebar_SchoolFood"]:
-        #         messages.chat_message(chat_message.role).write(chat_message.content)
-
-        # # 새로운 메시지를 추가
-        # def add_message_sidebar(role, message):
-        #     st.session_state["messages_sidebar_SchoolFood"].append(ChatMessage(role=role, content=message))
-
-        # # 키워드 질문 처리
-        # kw_1, kw_2 = create_keyword(st.session_state["messages_sidebar_SchoolFood"])
-        # kw_button_1 = placeholder1.button(label=kw_1, use_container_width=True, help="클릭하면 또 다른 질문이 생성돼요")
-        # kw_button_2 = placeholder2.button(label=kw_2, use_container_width=True, help="클릭하면 또 다른 질문이 생성돼요")
-
-        # # 사용자의 입력
-        # user_input = st.chat_input("🤓분석도우미에게 궁금한 내용을 물어보세요!")
-
-        # # 대화 chain 설정
-        # chain = st.session_state["df_chain_SchoolFood"]
-
-        # # 이전 대화 기록 출력
-        # print_messages_sidebar()
-
-        # # 만약에 사용자 입력이 들어오면...
-        # if user_input:
-        #     # 사용자의 입력
-        #     messages.chat_message("user").write(user_input)
-
-        #     input = {
-        #         "context": column_info,
-        #         "question": user_input
-        #     }
-
-        #     # 답변 스트리밍 호출
-        #     response = chain.stream(input)
-
-        #     with messages.chat_message("assistant"):
-        #         # 빈 공간(컨테이너)을 만들어서, 여기에 토큰을 스트리밍 출력한다.
-        #         container = st.empty()
-
-        #         ai_answer = ""
-        #         for token in response:
-        #             if isinstance(token, AIMessageChunk):
-        #                 ai_answer += token.content
-        #             elif isinstance(token, str):
-        #                 ai_answer += token
-        #             container.markdown(ai_answer)
-
-        #     # 대화기록을 저장한다.
-        #     add_message_sidebar("user", user_input)
-        #     add_message_sidebar("assistant", ai_answer)
-
-        #     kw_1, kw_2 = create_keyword(st.session_state["messages_sidebar_SchoolFood"])
-        #     placeholder1.button(label=kw_1, use_container_width=True)
-        #     placeholder2.button(label=kw_2, use_container_width=True)
-
-    # 메인 로직
+    ### 메인 로직
     if uploaded_file is not None and data_add_btn:
         # 업로드된 파일이 있고, 유효한 데이터프레임인 경우에만 처리
         if st.session_state["uploaded_data"] is not None and isinstance(st.session_state["uploaded_data"], pd.DataFrame):
@@ -459,6 +595,23 @@ if st.session_state["logged_in"]:
         st.session_state["messages_SchoolFood"] = []
         st.session_state["last_result_df"] = None
         st.session_state["last_figure"] = None
+        
+        # 데이터베이스 대화 생성/조회
+        if conversation_manager:
+            # 사용자 ID 가져오기 (로그인된 사용자 또는 기본값)
+            user_id = st.session_state.get('username', 'anonymous')
+            if user_id == 'anonymous':
+                warning_msg = "⚠️ 로그인하지 않은 사용자입니다. 'anonymous'로 저장됩니다."
+                st.warning(warning_msg)
+                add_message_main(MessageRole.ASSISTANT, [MessageType.ERROR, warning_msg])
+            
+            current_conversation = conversation_manager.get_or_create_conversation(
+                st.session_state.session_uuid,
+                user_id
+            )
+            if current_conversation:
+                st.session_state.conversation_id = current_conversation['session_uuid']
+
         
         # 데이터 정보 표시 (한글로)
         st.success(f"📊 데이터 로딩 완료: **{loaded_data.shape[0]}개 항목**, **{loaded_data.shape[1]}개 피처**")
@@ -551,9 +704,11 @@ if st.session_state["logged_in"]:
             st.info("✅ 업로드된 데이터 사용 중")
             if "uploaded_data" in st.session_state and st.session_state["uploaded_data"] is not None:
                 st.caption(f"데이터 크기: {st.session_state['uploaded_data'].shape[0]}행 × {st.session_state['uploaded_data'].shape[1]}열")
+                st.caption(f"👤 {st.session_state['username']}님 로그인됨")
         else:
             st.info("📁 기본 데이터 사용 중")
             st.caption(f"데이터 크기: {LOADED_DATA_SchoolFood.shape[0]}행 × {LOADED_DATA_SchoolFood.shape[1]}열")
+            st.caption(f"👤 {st.session_state['username']}님 로그인됨")
 
 else:
     st.error("먼저 로그인을 해주세요!")

@@ -16,6 +16,61 @@ import matplotlib.font_manager as fm
 import os
 import streamlit as st
 
+
+# DB 로깅 관련 함수들 (03_CSV_Agent_With_School_Food.py에서 가져옴)
+########################################################
+import uuid
+import time
+from datetime import datetime
+from enum import Enum
+
+
+class MessageRole(Enum):
+    USER = "user"
+    ASSISTANT = "assistant"
+
+
+class MessageType(Enum):
+    TEXT = "text"
+    CODE = "code"
+    DATAFRAME = "dataframe"
+    FIGURE = "figure"
+    ERROR = "error"
+
+
+def add_message_main(role: MessageRole, content_list):
+    """메시지를 세션에 추가하는 함수"""
+    try:
+        if "messages_SchoolFood" not in st.session_state:
+            st.session_state["messages_SchoolFood"] = []
+        
+        message = {
+            "role": role.value,
+            "content": content_list,
+            "timestamp": datetime.now().isoformat()
+        }
+        st.session_state["messages_SchoolFood"].append(message)
+        
+        # 데이터베이스 로깅 시도 (옵션)
+        try:
+            if hasattr(st.session_state, 'conversation_manager') and st.session_state.conversation_manager:
+                conversation_manager = st.session_state.conversation_manager
+                session_uuid = st.session_state.get('session_uuid', str(uuid.uuid4()))
+                
+                conversation_manager.add_message(
+                    session_uuid=session_uuid,
+                    role=role.value,
+                    content_list=content_list
+                )
+        except Exception as db_error:
+            # DB 로깅 실패해도 앱은 계속 실행
+            print(f"DB 로깅 실패: {db_error}")
+            
+    except Exception as e:
+        print(f"메시지 추가 실패: {e}")
+########################################################
+
+
 load_dotenv()
 
 
@@ -84,6 +139,12 @@ class DataAnalysisAgent:
                             print(f"전역 커스텀 한글 폰트 설정 완료: {font_name}")
                         except Exception as font_error:
                             print(f"전역 커스텀 폰트 로딩 실패: {font_error}")
+                            # DB에 에러 로그 저장
+                            try:
+                                error_msg = f"커스텀 폰트 로딩 실패: {str(font_error)}"
+                                add_message_main(MessageRole.ASSISTANT, [MessageType.ERROR, error_msg])
+                            except:
+                                pass  # DB 로깅 실패 시 무시
                             plt.rcParams['font.family'] = 'DejaVu Sans'
                             print("전역: 기본 폰트를 사용합니다.")
                     else:
@@ -93,6 +154,12 @@ class DataAnalysisAgent:
                 
             except Exception as e:
                 print(f"전역 폰트 설정 오류: {e}")
+                # DB에 에러 로그 저장
+                try:
+                    error_msg = f"폰트 설정 오류: {str(e)}"
+                    add_message_main(MessageRole.ASSISTANT, [MessageType.ERROR, error_msg])
+                except:
+                    pass  # DB 로깅 실패 시 무시
                 plt.rcParams['font.family'] = 'DejaVu Sans'
 
             try:                
@@ -154,6 +221,14 @@ class DataAnalysisAgent:
                 import traceback
                 error_detail = traceback.format_exc()
                 print(f"[DataAnalysisAgent Error] {error_detail}")
+                
+                # DB에 에러 로그 저장
+                try:
+                    error_msg = f"Python 코드 실행 오류: {str(e)}"
+                    add_message_main(MessageRole.ASSISTANT, [MessageType.ERROR, error_msg])
+                except:
+                    pass  # DB 로깅 실패 시 무시
+                
                 return f"Execution failed. Error: {repr(e)}"
 
         return python_repl_tool
