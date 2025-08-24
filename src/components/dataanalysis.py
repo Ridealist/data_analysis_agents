@@ -235,7 +235,7 @@ class DataAnalysisAgent:
 
     def build_system_prompt(self):
 
-        system_prompt = load_prompt("prompts/data-analysis-V02.yaml", encoding="utf-8")
+        system_prompt = load_prompt("src/prompts/data-analysis-V02.yaml", encoding="utf-8")
         system_prompt = system_prompt.format(
             dataframe_head=self.df.head().to_string(),
             column_guideline=self.column_guideline,
