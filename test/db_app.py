@@ -6,7 +6,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 
-from db.dynamo import DynamoDBManager, S3Manager, ConversationManager, MessageManager, timestamp_to_datetime
+from src.components.dynamo import DynamoDBManager, S3Manager, ConversationManager, MessageManager, timestamp_to_datetime
 
 # --- 환경 설정 ---
 
