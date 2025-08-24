@@ -8,22 +8,21 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import os
 import warnings
-import json
 import time
 import uuid
-import io
-from datetime import datetime, timezone
 
 from langchain_core.output_parsers import StrOutputParser
 
 from langchain_openai import ChatOpenAI
 from langchain_teddynote.prompts import load_prompt
-from langchain_teddynote import logging # 로깅 설정
+# from langchain_teddynote import logging # 로깅 설정
 # from langchain_teddynote.messages import stream_response  # 스트리밍 출력
 
 
 # 데이터베이스 관련 import
-from db.dynamo import DynamoDBManager, S3Manager, ConversationManager, MessageManager, timestamp_to_datetime
+from src.components.dynamo import DynamoDBManager, S3Manager, ConversationManager, MessageManager
+from src.components.dataclass import MessageRole, MessageType
+from src.components.sidebar import render_model_setting, render_data_info, render_conversation_history
 
 # 경고 메시지 숨기기
 warnings.filterwarnings('ignore')
@@ -34,16 +33,12 @@ load_dotenv()
 os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
 
 
-##### 모델 설정 #####
-DEFAULT_SIDEBAR_TUTOR_MODEL = "gpt-4o-mini"
-DEFAULT_DATA_ANALYSIS_MODEL = "gpt-4.1"
-
-## LangSmith 세팅 (주석 처리)
-os.environ["LANGCHAIN_TRACING_V2"] = st.secrets["LANGCHAIN_TRACING_V2"]
-os.environ["LANGCHAIN_API_KEY"] = st.secrets["LANGCHAIN_API_KEY"]
-os.environ["LANGCHAIN_ENDPOINT"] = st.secrets["LANGCHAIN_ENDPOINT"]
-os.environ["LANGCHAIN_PROJECT"] = st.secrets["LANGCHAIN_PROJECT"]
-logging.langsmith("Agent 챗봇 학교급식[창의성] 0813")
+# ## LangSmith 세팅 (주석 처리)
+# os.environ["LANGCHAIN_TRACING_V2"] = st.secrets["LANGCHAIN_TRACING_V2"]
+# os.environ["LANGCHAIN_API_KEY"] = st.secrets["LANGCHAIN_API_KEY"]
+# os.environ["LANGCHAIN_ENDPOINT"] = st.secrets["LANGCHAIN_ENDPOINT"]
+# os.environ["LANGCHAIN_PROJECT"] = st.secrets["LANGCHAIN_PROJECT"]
+# logging.langsmith("Agent 챗봇 학교급식[창의성] 0813")
 
 # --- 데이터베이스 설정 ---
 AWS_ACCESS_KEY_ID = st.secrets.get("AWS_ACCESS_KEY_ID")
@@ -91,9 +86,9 @@ def init_managers():
 # 매니저 인스턴스 가져오기
 dynamo_manager, s3_manager, conversation_manager, message_manager = init_managers()
 
-#--------------------------------#
-#         Streamlit Session State         #
-#--------------------------------#
+#----------------------------------------#
+#         Streamlit Session State        #
+#----------------------------------------#
 
 
 # 세션 상태 초기화
@@ -117,6 +112,10 @@ if "session_uuid" not in st.session_state:
 if "conversation_id" not in st.session_state:
     st.session_state.conversation_id = None
 
+# LLM chain 모델 설정 세션 상태 추가
+if "model_option_general" not in st.session_state:
+    st.session_state["model_option_general"] = "gpt-4.1-mini"
+
 # 데이터 로딩 (기본값)
 FILE_PATH_SchoolFood = "data/school_food_cut.csv"
 LOADED_DATA_SchoolFood = pd.read_csv(FILE_PATH_SchoolFood, index_col=0)
@@ -126,36 +125,16 @@ if st.session_state["uploaded_data"] is not None and isinstance(st.session_state
     LOADED_DATA_SchoolFood = st.session_state["uploaded_data"]
 
 
-#--------------------------------#
-#         클래스 정의           #
-#--------------------------------#
-
-class MessageRole:
-    """
-    메시지 역할을 정의하는 클래스입니다.
-    """
-
-    USER = "user"  # 사용자 메시지 역할
-    ASSISTANT = "assistant"  # 어시스턴트 메시지 역할
-
-
-class MessageType:
-    """
-    메시지 유형을 정의하는 클래스입니다.
-    """
-
-    TEXT = "text"  # 텍스트 메시지
-    FIGURE = "figure"  # 그림 메시지
-    CODE = "code"  # 코드 메시지
-    DATAFRAME = "dataframe"  # 데이터프레임 메시지
-    ERROR = "error"  # 에러 메시지
-
+##### 모델 설정 #####
+# 사이드바 하단에 현재 데이터 상태 표시
+if st.session_state["logged_in"]:
+    render_model_setting()
 
 #--------------------------------#
-#      체인 생성 함수         #
+#      LLM 체인 생성 함수          #
 #--------------------------------#
 @st.cache_resource
-def create_chain(prompt_path="prompts/general_gpto3.yaml", model_name=DEFAULT_SIDEBAR_TUTOR_MODEL):
+def create_chain(prompt_path="src/prompts/general_gpto3.yaml", model_name=st.session_state["model_option_general"]):
     # 단계 6: 프롬프트 생성(Create Prompt)
     # 프롬프트를 생성합니다.
     prompt = load_prompt(prompt_path, encoding="utf-8")
@@ -172,19 +151,9 @@ def create_chain(prompt_path="prompts/general_gpto3.yaml", model_name=DEFAULT_SI
     return chain
 
 #--------------------------------#
-#      메시지 관련 함수         #
+#         메시지 관련 함수         #
 #--------------------------------#
 
-# S3 경로 확인 함수는 현재 사용되지 않음
-# def is_s3_path(content):
-#     """콘텐츠가 S3 경로인지 확인"""
-#     return isinstance(content, str) and content.startswith(st.session_state.get('conversation_id', ''))
-
-# DB 읽기 기능은 지원하지 않음 (요구사항: 저장만 지원)
-# def load_messages_from_db():
-#     """DB에서 메시지를 로드하여 세션 상태에 저장"""
-#     # 이번 버전에서는 DB 읽기 기능을 지원하지 않습니다.
-#     pass
 
 def add_message_main(role: MessageRole, content: List[Union[MessageType, str]]):
     """새로운 메시지를 저장하는 함수 (DB 연동)"""
@@ -264,7 +233,8 @@ def print_messages_main():
                         st.pyplot(message_content)
                     
                     elif message_type == MessageType.CODE:
-                        with st.status("코드 출력", expanded=False):
+                        # AI 응답 형식이 아닌 경우 st.expander 안에서 st.code로 표시
+                        with st.expander("🔍 실행된 코드 보기", expanded=False):
                             st.code(message_content, language="python")
                     
                     elif message_type == MessageType.DATAFRAME:
@@ -280,7 +250,6 @@ def print_messages_main():
 #--------------------------------#
 #         콜백 함수             #
 #--------------------------------#
-# 콜백 함수
 def tool_callback(tool) -> None:
     """
     도구 실행 결과를 처리하는 콜백 함수입니다.
@@ -358,10 +327,9 @@ def result_callback(result: str) -> None:
 #--------------------------------#
 #      에이전트 생성 함수       #
 #--------------------------------#
-
 def create_agent(
     dataframe,
-    selected_model=DEFAULT_DATA_ANALYSIS_MODEL,
+    selected_model=st.session_state["model_option_general"],
     prefix_prompt=None,
     postfix_prompt=None,
     user_column_guideline=None,
@@ -377,7 +345,7 @@ def create_agent(
     Returns:
         Agent: 생성된 데이터프레임 에이전트
     """
-    from dataanalysis import DataAnalysisAgent
+    from src.components.dataanalysis import DataAnalysisAgent
 
     # 공유 python_tool 전달
     shared_tool = st.session_state.get("python_tool", None)
@@ -485,7 +453,8 @@ if "logged_in" not in st.session_state:
 if "logged_in" not in st.session_state or st.session_state.logged_in == False:
     st.error(f"👤 로그인이 필요합니다!")
     time.sleep(1.0)
-    st.switch_page("pages/00_Main.py")
+    st.switch_page("src/pages/00_Main.py")
+
 
 #--------------------------------#
 #         Login 된 이후 로직         #
@@ -507,47 +476,9 @@ if st.session_state["logged_in"]:
         add_message_main(MessageRole.ASSISTANT, [MessageType.ERROR, error_msg])
         st.stop()
 
-    # 사이드바 설정
+
+#-------Sidebar 설정 ----------#
     with st.sidebar:
-        # ### 대화 기록 섹션
-        # st.header("대화 기록")
-        
-        # # 새 대화 시작 버튼
-        # if st.button("➕ 새 대화 시작", use_container_width=True):
-        #     st.session_state.session_uuid = str(uuid.uuid4())
-        #     st.session_state.conversation_id = None
-        #     st.session_state["messages_SchoolFood"] = []
-        #     st.rerun()
-
-        # st.divider()
-
-        # # 대화 목록 표시 (사용자 ID가 있는 경우)
-        # if hasattr(st.session_state, 'username'):
-        #     try:
-        #         conversations = conversation_manager.get_user_conversations(st.session_state.username)
-                
-        #         for convo in conversations:
-        #             # 현재 보고 있는 대화 강조
-        #             button_type = "primary" if convo['session_uuid'] == st.session_state.conversation_id else "secondary"
-                    
-        #             col1, col2 = st.columns([0.8, 0.2])
-        #             with col1:
-        #                 if st.button(f"{convo['topic']} ({timestamp_to_datetime(convo['created_at']).strftime('%y-%m-%d %H:%M')})", 
-        #                             key=f"convo_{convo['session_uuid']}", use_container_width=True, type=button_type):
-        #                     st.session_state.session_uuid = convo['session_uuid']
-        #                     st.session_state.conversation_id = convo['session_uuid']
-        #                     st.rerun()
-        #             with col2:
-        #                 if st.button("🗑️", key=f"del_{convo['session_uuid']}"):
-        #                     conversation_manager.delete_conversation(convo['session_uuid'], s3_manager)
-        #                     if st.session_state.conversation_id == convo['session_uuid']:
-        #                         st.session_state.session_uuid = str(uuid.uuid4())
-        #                         st.session_state.conversation_id = None
-        #                     st.rerun()
-        #     except Exception as e:
-        #         st.error(f"대화 목록 로드 실패: {e}")
-
-        
         ### 파일 업로드 섹션
         st.header("📁 데이터 업로드")
         uploaded_file = st.file_uploader("파일 업로드", type=["csv"], help="학교 급식 데이터를 업로드해주세요.")
@@ -564,7 +495,14 @@ if st.session_state["logged_in"]:
                 add_message_main(MessageRole.ASSISTANT, [MessageType.ERROR, error_msg])
                 st.session_state["uploaded_data"] = None
 
-    ### 메인 로직
+        # 사이드바에 대화 기록 표시
+        render_conversation_history(s3_manager, conversation_manager, message_manager)
+
+        # 사이드바 하단에 현재 데이터 상태 표시
+        render_data_info(LOADED_DATA_SchoolFood)
+
+
+#-------메인 로직 설정 ----------#
     if uploaded_file is not None and data_add_btn:
         # 업로드된 파일이 있고, 유효한 데이터프레임인 경우에만 처리
         if st.session_state["uploaded_data"] is not None and isinstance(st.session_state["uploaded_data"], pd.DataFrame):
@@ -646,7 +584,7 @@ if st.session_state["logged_in"]:
         # Agent 생성 - 같은 python_tool 사용하도록
         st.session_state["agent_SchoolFood"] = create_agent(
             loaded_data,
-            DEFAULT_DATA_ANALYSIS_MODEL,
+            st.session_state["model_option_general"],
             prefix_prompt="""
     이 AI는 중학생 여러분을 위한 학교 급식 데이터 분석 도우미입니다.
     - 어려운 용어나 복잡한 개념 대신 쉽고 친근한 말로 설명해주세요
@@ -694,22 +632,6 @@ if st.session_state["logged_in"]:
     user_input = st.chat_input("데이터에 질문해보세요!")  # 사용자 입력 받기
     if user_input:
         ask(user_input)  # 사용자 질문 처리
-
-
-    # 사이드바 하단에 현재 데이터 상태 표시
-    with st.sidebar:
-        st.markdown("---")
-        
-        # 현재 데이터 상태 표시
-        if st.session_state.get("data_applied", False):
-            st.info("✅ 업로드된 데이터 사용 중")
-            if "uploaded_data" in st.session_state and st.session_state["uploaded_data"] is not None:
-                st.caption(f"데이터 크기: {st.session_state['uploaded_data'].shape[0]}행 × {st.session_state['uploaded_data'].shape[1]}열")
-                st.caption(f"👤 {st.session_state['username']}님 로그인됨")
-        else:
-            st.info("📁 기본 데이터 사용 중")
-            st.caption(f"데이터 크기: {LOADED_DATA_SchoolFood.shape[0]}행 × {LOADED_DATA_SchoolFood.shape[1]}열")
-            st.caption(f"👤 {st.session_state['username']}님 로그인됨")
 
 else:
     st.error("먼저 로그인을 해주세요!")

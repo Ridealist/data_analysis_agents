@@ -17,10 +17,8 @@ import os
 import streamlit as st
 
 
-# DB 로깅 관련 함수들 (03_CSV_Agent_With_School_Food.py에서 가져옴)
 ########################################################
 import uuid
-import time
 from datetime import datetime
 from enum import Enum
 
