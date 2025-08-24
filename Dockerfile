@@ -39,9 +39,8 @@ RUN pip install --upgrade python-magic
 FROM python:3.11-slim
 
 # 런타임에 필요한 시스템 패키지만 설치
-RUN apt-get update && apt-get install -y \
-    fonts-nanum* \
-    fonts-nanum-coding \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    fonts-nanum \
     fonts-nanum-extra \
     fontconfig \
     libmagic1 \
