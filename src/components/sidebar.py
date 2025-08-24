@@ -104,7 +104,7 @@ def render_model_setting():
 
             model_option_general = st.selectbox(
                 label="모델 선택지",
-                options=["gpt-4.1-mini", "gpt-4o", "gpt-4.1"],
+                options=["gpt-4o-mini", "gpt-4.1-mini", "gpt-4o", "gpt-4.1"],
                 index=0,
                 help="데이터 분석을 위한 OpenAI 모델을 설정합니다."
             )

@@ -18,6 +18,9 @@ from langchain_teddynote.prompts import load_prompt
 # from langchain_teddynote import logging # 로깅 설정
 # from langchain_teddynote.messages import stream_response  # 스트리밍 출력
 
+# OpenAI 에러 처리 관련 import
+from openai import OpenAIError, RateLimitError, APITimeoutError, APIConnectionError
+
 
 # 데이터베이스 관련 import
 from src.components.dynamo import DynamoDBManager, S3Manager, ConversationManager, MessageManager
@@ -123,6 +126,52 @@ if st.session_state["logged_in"]:
     render_model_setting()
 
 #--------------------------------#
+#      OpenAI 에러 처리 함수      #
+#--------------------------------#
+def handle_openai_error(error, current_model):
+    """OpenAI 에러를 처리하고 더 경량 모델로 전환하는 함수"""
+    
+    # 모델 전환 순서 (무거운 모델 → 가벼운 모델)
+    model_fallback_chain = [
+        "gpt-4.1", "gpt-4o", "gpt-4.1-mini", "gpt-4o-mini"
+    ]
+    
+    # 현재 모델의 인덱스 찾기
+    try:
+        current_index = model_fallback_chain.index(current_model)
+        # 더 가벼운 모델들만 선택
+        fallback_models = model_fallback_chain[current_index + 1:]
+    except ValueError:
+        # 현재 모델이 체인에 없으면 기본값 사용
+        fallback_models = ["gpt-4o-mini"]
+    
+    # 에러 타입별 메시지 생성
+    if isinstance(error, RateLimitError):
+        error_msg = f"🚨 **API 요청 한도 초과**: {current_model} 모델의 요청 한도를 초과했습니다."
+    elif isinstance(error, APITimeoutError):
+        error_msg = f"⏰ **API 응답 시간 초과**: {current_model} 모델의 응답이 너무 느립니다."
+    elif isinstance(error, APIConnectionError):
+        error_msg = f"🔌 **API 연결 오류**: {current_model} 모델에 연결할 수 없습니다."
+    else:
+        error_msg = f"❌ **OpenAI API 오류**: {current_model} 모델에서 오류가 발생했습니다."
+    
+    # 더 가벼운 모델로 전환 시도
+    if fallback_models:
+        next_model = fallback_models[0]
+        error_msg += f"\n\n🔄 **자동 모델 전환**: {next_model} 모델로 전환하여 재시도합니다."
+        
+        # 모델 전환
+        st.session_state["model_option_general"] = next_model
+        
+        # 성공 메시지 표시
+        st.success(f"✅ 모델이 {next_model}로 자동 전환되었습니다!")
+        
+        return True, next_model, error_msg
+    else:
+        error_msg += "\n\n⚠️ **모든 모델 시도 완료**: 더 이상 사용할 수 있는 모델이 없습니다."
+        return False, None, error_msg
+
+#--------------------------------#
 #      LLM 체인 생성 함수          #
 #--------------------------------#
 @st.cache_resource
@@ -133,7 +182,20 @@ def create_chain(prompt_path="src/prompts/general_gpto3.yaml", model_name=st.ses
 
     # 단계 7: 언어모델(LLM) 생성
     # 모델(LLM) 을 생성합니다.
-    llm = ChatOpenAI(model_name=model_name, temperature=1)
+    try:
+        llm = ChatOpenAI(model_name=model_name, temperature=1)
+    except Exception as e:
+        # OpenAI 에러 처리
+        success, new_model, error_msg = handle_openai_error(e, model_name)
+        if success:
+            # 새로운 모델로 재시도
+            st.warning(error_msg)
+            time.sleep(2)
+            st.rerun()
+        else:
+            # 모든 모델 실패
+            st.error(error_msg)
+            return None
     
     output_parser = StrOutputParser()
 
@@ -385,15 +447,34 @@ def ask(query):
         response_items = []
         executed_code = ""
         
-        # 스트림 응답 수집
-        for step in agent.stream(query, "abc123"):
-            response_items.append(step)
-            
-            # 코드 실행 감지
-            if "actions" in step:
-                for action in step["actions"]:
-                    if action.tool == "python_repl_tool":
-                        executed_code = action.tool_input.get("code", "")
+        try:
+            # 스트림 응답 수집
+            for step in agent.stream(query, "abc123"):
+                response_items.append(step)
+                
+                # 코드 실행 감지
+                if "actions" in step:
+                    for action in step["actions"]:
+                        if action.tool == "python_repl_tool":
+                            executed_code = action.tool_input.get("code", "")
+        except OpenAIError as e:
+            # OpenAI 에러 처리
+            success, new_model, error_msg = handle_openai_error(e, st.session_state["model_option_general"])
+            if success:
+                # 새로운 모델로 재시도
+                st.warning(error_msg)
+                st.info("🔄 새로운 모델로 질문을 다시 시도해주세요.")
+                return
+            else:
+                # 모든 모델 실패
+                st.error(error_msg)
+                st.info("⚠️ 잠시 후 다시 시도해주세요.")
+                return
+        except Exception as e:
+            # 기타 에러 처리
+            st.error(f"❌ 예상치 못한 오류가 발생했습니다: {str(e)}")
+            st.info("⚠️ 잠시 후 다시 시도해주세요.")
+            return
 
     # 응답 출력
     with st.chat_message("assistant"):
