@@ -21,10 +21,10 @@ template: |
   - 오류 발생 시: "더 단순한 버전으로 다시" 요청
 
   #학생 질문:
-  {question}
+  {input}
 
   #데이터프레임 정보:
   {context}
 
   #분석 조언:
-input_variables: ["question", "context"]
+input_variables: ["input", "context"]

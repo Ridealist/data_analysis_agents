@@ -85,7 +85,7 @@ def load_messages_from_db(conversation_id: str, message_manager: MessageManager,
                         session_messages.append([role, [[MessageType.TEXT, content]]])
             
             # 세션 상태에 메시지 저장
-            st.session_state["messages_SchoolFood"] = session_messages
+            st.session_state["messages_UploadData"] = session_messages
             return True
         
     except Exception as e:
@@ -98,6 +98,8 @@ def load_messages_from_db(conversation_id: str, message_manager: MessageManager,
 #--------------------------------#
 def render_model_setting():
     with st.sidebar:
+        st.caption(f"👤 {st.session_state['username']}님 로그인됨")
+
         with st.expander("🧠 데이터 분석 모델 설정", expanded=False):
 
             model_option_general = st.selectbox(
@@ -112,7 +114,7 @@ def render_model_setting():
                 st.success(f"모델 설정 완료: {model_option_general}")
                 time.sleep(1)
                 st.rerun()
-
+        
 def render_conversation_history(s3_manager: S3Manager, conversation_manager: ConversationManager, message_manager: MessageManager):
     with st.sidebar:
         st.divider()
@@ -122,9 +124,26 @@ def render_conversation_history(s3_manager: S3Manager, conversation_manager: Con
         if st.button("➕ 새 대화 시작", use_container_width=True):
             st.session_state.session_uuid = str(uuid.uuid4())
             st.session_state.conversation_id = None
-            st.session_state["messages_SchoolFood"] = []
+            
+            # 대화 관련 세션 상태 초기화
+            st.session_state["messages_UploadData"] = []
             st.session_state["last_result_df"] = None
             st.session_state["last_figure"] = None
+            
+            # 업로드된 파일 및 데이터프레임 관련 세션 상태 초기화
+            st.session_state["uploaded_data"] = None
+            st.session_state["df_UploadData"] = None
+            
+            # 에이전트 및 Python 도구 관련 세션 상태 초기화
+            if "agent_with_UploadData" in st.session_state:
+                del st.session_state["agent_with_UploadData"]
+            if "python_tool" in st.session_state:
+                del st.session_state["python_tool"]
+            
+            # 데이터 적용 상태 초기화
+            if "data_applied" in st.session_state:
+                del st.session_state["data_applied"]
+            
             st.success("🆕 새로운 대화를 시작합니다!")
             time.sleep(1)
             st.rerun()
@@ -150,16 +169,16 @@ def render_conversation_history(s3_manager: S3Manager, conversation_manager: Con
                                 st.success(f"✅ '{convo['topic']}' 대화를 불러왔습니다!")
                                 
                                 # 에이전트 상태 복원 (데이터프레임이 있는 경우)
-                                if st.session_state.get("messages_SchoolFood"):
-                                    for role, content_list in st.session_state["messages_SchoolFood"]:
+                                if st.session_state.get("messages_UploadData"):
+                                    for role, content_list in st.session_state["messages_UploadData"]:
                                         for content in content_list:
                                             if isinstance(content, list) and len(content) == 2:
                                                 message_type, message_content = content
                                                 if message_type == MessageType.DATAFRAME and isinstance(message_content, pd.DataFrame):
                                                     # 마지막 데이터프레임을 현재 데이터로 설정
-                                                    st.session_state["df_SchoolFood"] = message_content
+                                                    st.session_state["df_UploadData"] = message_content
                                                     if "python_tool" in st.session_state:
-                                                        st.session_state["python_tool"].locals["df_SchoolFood"] = message_content
+                                                        st.session_state["python_tool"].locals["df_UploadData"] = message_content
                                                         st.session_state["python_tool"].locals["df"] = message_content
                                                     break
                             else:
@@ -180,13 +199,10 @@ def render_conversation_history(s3_manager: S3Manager, conversation_manager: Con
 
 def render_data_info(uploaded_data: pd.DataFrame):
     with st.sidebar:
-        st.markdown("---")
 
         # 현재 데이터 상태 표시
         if st.session_state.get("data_applied", False):
             if "uploaded_data" in st.session_state and st.session_state["uploaded_data"] is not None:
                 st.caption(f"데이터 크기: {st.session_state['uploaded_data'].shape[0]}행 × {st.session_state['uploaded_data'].shape[1]}열")
-                st.caption(f"👤 {st.session_state['username']}님 로그인됨")
         else:
             st.caption(f"데이터 크기: {uploaded_data.shape[0]}행 × {uploaded_data.shape[1]}열")
-            st.caption(f"👤 {st.session_state['username']}님 로그인됨")
