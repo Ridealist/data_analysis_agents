@@ -187,6 +187,9 @@ def create_chain(prompt_path="src/prompts/general_gpto3.yaml", model_name=st.ses
     except Exception as e:
         # OpenAI 에러 처리
         success, new_model, error_msg = handle_openai_error(e, model_name)
+
+        llm = ChatOpenAI(model_name=new_model, temperature=1)
+
         if success:
             # 새로운 모델로 재시도
             st.warning(error_msg)
