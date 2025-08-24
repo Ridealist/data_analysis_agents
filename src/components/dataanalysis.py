@@ -9,7 +9,6 @@ from langchain_openai import ChatOpenAI
 from langchain.agents import create_tool_calling_agent, AgentExecutor
 from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.runnables.history import RunnableWithMessageHistory
-from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
@@ -77,6 +76,7 @@ class DataAnalysisAgent:
         self,
         dataframe: pd.DataFrame,
         model_name: str = "gpt-4o",
+        api_key: str = os.environ["OPENAI_API_KEY"],
         temperature: float = 1.0,
         prefix_prompt: Optional[str] = None,
         postfix_prompt: Optional[str] = None,
@@ -85,6 +85,7 @@ class DataAnalysisAgent:
     ):
         self.df = dataframe
         self.model_name = model_name
+        self.api_key = api_key
         self.temperature = temperature
         self.prefix_prompt = prefix_prompt
         self.postfix_prompt = postfix_prompt
@@ -256,7 +257,11 @@ class DataAnalysisAgent:
             ]
         )
 
-        llm = ChatOpenAI(model=self.model_name, temperature=self.temperature)
+        # API 키 확인 및 디버깅
+        if not self.api_key:
+            raise ValueError("❌ OpenAI API 키가 설정되지 않았습니다.")
+
+        llm = ChatOpenAI(model=self.model_name, temperature=self.temperature, openai_api_key=self.api_key)
         agent = create_tool_calling_agent(llm, self.tools, prompt)
         self.agent_executor = AgentExecutor(
             agent=agent,

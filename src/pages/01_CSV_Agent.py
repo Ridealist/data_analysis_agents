@@ -1,5 +1,4 @@
 from typing import List, Union
-from langchain_experimental.tools import PythonAstREPLTool
 from dotenv import load_dotenv
 import streamlit as st
 import pandas as pd
@@ -11,21 +10,20 @@ import warnings
 import time
 import uuid
 
-from langchain_core.output_parsers import StrOutputParser
+from langchain_experimental.tools import PythonAstREPLTool
 
-from langchain_openai import ChatOpenAI
-from langchain_teddynote.prompts import load_prompt
 # from langchain_teddynote import logging # 로깅 설정
 # from langchain_teddynote.messages import stream_response  # 스트리밍 출력
 
 # OpenAI 에러 처리 관련 import
-from openai import OpenAIError, RateLimitError, APITimeoutError, APIConnectionError
-
+from openai import OpenAIError, InternalServerError
 
 # 데이터베이스 관련 import
 from src.components.dynamo import DynamoDBManager, S3Manager, ConversationManager, MessageManager
 from src.components.dataclass import MessageRole, MessageType
-from src.components.sidebar import render_model_setting, render_data_info, render_conversation_history
+from src.components.sidebar import render_system_setting, render_data_info, render_conversation_history
+from src.components.llm import set_openai_api_key, handle_openai_error
+from src.prompts.agent_prompts import AGENT_PREFIX_PROMPT, AGENT_POSTFIX_PROMPT
 
 # 경고 메시지 숨기기
 warnings.filterwarnings('ignore')
@@ -33,8 +31,10 @@ warnings.filterwarnings('ignore')
 
 ##### API 키 및 프로젝트 설정 #####
 load_dotenv()
-os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
 
+# 초기 API 키 설정
+if not set_openai_api_key():
+    st.stop()
 
 # ## LangSmith 세팅 (주석 처리)
 # os.environ["LANGCHAIN_TRACING_V2"] = st.secrets["LANGCHAIN_TRACING_V2"]
@@ -92,9 +92,6 @@ dynamo_manager, s3_manager, conversation_manager, message_manager = init_manager
 #----------------------------------------#
 #         Streamlit Session State        #
 #----------------------------------------#
-
-
-# 세션 상태 초기화
 if "messages_UploadData" not in st.session_state:
     st.session_state["messages_UploadData"] = []  # 대화 내용을 저장할 리스트 초기화
 
@@ -108,6 +105,7 @@ if "uploaded_data" not in st.session_state:
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
 
+
 # 데이터베이스 관련 세션 상태 추가
 if "session_uuid" not in st.session_state:
     st.session_state.session_uuid = str(uuid.uuid4())
@@ -115,103 +113,44 @@ if "session_uuid" not in st.session_state:
 if "conversation_id" not in st.session_state:
     st.session_state.conversation_id = None
 
+
 # LLM chain 모델 설정 세션 상태 추가
 if "model_option_general" not in st.session_state:
     st.session_state["model_option_general"] = "gpt-4.1-mini"
 
 
+# API 키 관련 세션 상태 추가
+if "openai_api_key" not in st.session_state:
+    st.session_state["openai_api_key"] = None
+
+
 ##### 모델 설정 #####
 # 사이드바 하단에 현재 데이터 상태 표시
 if st.session_state["logged_in"]:
-    render_model_setting()
-
-#--------------------------------#
-#      OpenAI 에러 처리 함수      #
-#--------------------------------#
-def handle_openai_error(error, current_model):
-    """OpenAI 에러를 처리하고 더 경량 모델로 전환하는 함수"""
-    
-    # 모델 전환 순서 (무거운 모델 → 가벼운 모델)
-    model_fallback_chain = [
-        "gpt-4.1", "gpt-4o", "gpt-4.1-mini", "gpt-4o-mini"
-    ]
-    
-    # 현재 모델의 인덱스 찾기
-    try:
-        current_index = model_fallback_chain.index(current_model)
-        # 더 가벼운 모델들만 선택
-        fallback_models = model_fallback_chain[current_index + 1:]
-    except ValueError:
-        # 현재 모델이 체인에 없으면 기본값 사용
-        fallback_models = ["gpt-4o-mini"]
-    
-    # 에러 타입별 메시지 생성
-    if isinstance(error, RateLimitError):
-        error_msg = f"🚨 **API 요청 한도 초과**: {current_model} 모델의 요청 한도를 초과했습니다."
-    elif isinstance(error, APITimeoutError):
-        error_msg = f"⏰ **API 응답 시간 초과**: {current_model} 모델의 응답이 너무 느립니다."
-    elif isinstance(error, APIConnectionError):
-        error_msg = f"🔌 **API 연결 오류**: {current_model} 모델에 연결할 수 없습니다."
-    else:
-        error_msg = f"❌ **OpenAI API 오류**: {current_model} 모델에서 오류가 발생했습니다."
-    
-    # 더 가벼운 모델로 전환 시도
-    if fallback_models:
-        next_model = fallback_models[0]
-        error_msg += f"\n\n🔄 **자동 모델 전환**: {next_model} 모델로 전환하여 재시도합니다."
-        
-        # 모델 전환
-        st.session_state["model_option_general"] = next_model
-        
-        # 성공 메시지 표시
-        st.success(f"✅ 모델이 {next_model}로 자동 전환되었습니다!")
-        
-        return True, next_model, error_msg
-    else:
-        error_msg += "\n\n⚠️ **모든 모델 시도 완료**: 더 이상 사용할 수 있는 모델이 없습니다."
-        return False, None, error_msg
+    render_system_setting()
 
 #--------------------------------#
 #      LLM 체인 생성 함수          #
 #--------------------------------#
-@st.cache_resource
-def create_chain(prompt_path="src/prompts/general_gpto3.yaml", model_name=st.session_state["model_option_general"]):
-    # 단계 6: 프롬프트 생성(Create Prompt)
-    # 프롬프트를 생성합니다.
-    prompt = load_prompt(prompt_path, encoding="utf-8")
+##TODO 추후 SRL_Agent 로직 적용
+# @st.cache_resource
+# def create_chain(prompt_path="src/prompts/general_gpto3.yaml", model_name=st.session_state["model_option_general"]):
+#     # 단계 6: 프롬프트 생성(Create Prompt)
+#     # 프롬프트를 생성합니다.
+#     prompt = load_prompt(prompt_path, encoding="utf-8")
 
-    # 단계 7: 언어모델(LLM) 생성
-    # 모델(LLM) 을 생성합니다.
-    try:
-        llm = ChatOpenAI(model_name=model_name, temperature=1)
-    except Exception as e:
-        # OpenAI 에러 처리
-        success, new_model, error_msg = handle_openai_error(e, model_name)
+#     # 단계 7: 언어모델(LLM) 생성
+#     # 모델(LLM) 을 생성합니다.
+#     llm = ChatOpenAI(model_name=model_name, temperature=1)
 
-        llm = ChatOpenAI(model_name=new_model, temperature=1)
+#     # 단계 8: 체인(Chain) 생성
+#     chain = prompt | llm | StrOutputParser()
 
-        if success:
-            # 새로운 모델로 재시도
-            st.warning(error_msg)
-            time.sleep(2)
-            st.rerun()
-        else:
-            # 모든 모델 실패
-            st.error(error_msg)
-            return None
-    
-    output_parser = StrOutputParser()
-
-    # 단계 8: 체인(Chain) 생성
-    chain = prompt | llm | output_parser
-
-    return chain
+#     return chain
 
 #--------------------------------#
 #         메시지 관련 함수         #
 #--------------------------------#
-
-
 def add_message_main(role: MessageRole, content: List[Union[MessageType, str]]):
     """새로운 메시지를 저장하는 함수 (DB 연동)"""
     message_type, message_content = content
@@ -387,6 +326,7 @@ def result_callback(result: str) -> None:
 def create_agent(
     dataframe,
     selected_model=st.session_state["model_option_general"],
+    api_key=None,
     prefix_prompt=None,
     postfix_prompt=None,
     user_column_guideline=None,
@@ -398,11 +338,30 @@ def create_agent(
     Args:
         dataframe (pd.DataFrame): 분석할 데이터프레임
         selected_model (str, optional): 사용할 OpenAI 모델. 기본값은 "gpt-4.1"
+        api_key (str, optional): OpenAI API 키. 기본값은 None (세션 상태에서 가져옴)
 
     Returns:
         Agent: 생성된 데이터프레임 에이전트
     """
     from src.components.dataanalysis import DataAnalysisAgent
+
+    # API 키가 전달되지 않은 경우 세션 상태에서 가져오기
+    if api_key is None:
+        # 먼저 세션 상태에서 가져오기
+        api_key = st.session_state.get("openai_api_key")
+        
+        # 세션 상태에 없으면 환경 변수에서 가져오기
+        if not api_key:
+            api_key = os.environ.get("OPENAI_API_KEY")
+    
+    # API 키가 여전히 없는 경우 에러
+    if not api_key:
+        st.error("❌ OpenAI API 키가 설정되지 않았습니다.")
+        st.sidebar.error("⚠️ 사이드바에서 API 키를 설정해주세요.")
+        return None
+    
+    # API 키가 있는 경우 성공 메시지
+    st.sidebar.success(f"✅ API 키 사용: {len(api_key)}자")
 
     # 공유 python_tool 전달
     shared_tool = st.session_state.get("python_tool", None)
@@ -410,6 +369,7 @@ def create_agent(
     return DataAnalysisAgent(
         dataframe,
         model_name=selected_model,
+        api_key=api_key,
         prefix_prompt=prefix_prompt,
         postfix_prompt=postfix_prompt,
         column_guideline=user_column_guideline,
@@ -463,20 +423,43 @@ def ask(query):
         except OpenAIError as e:
             # OpenAI 에러 처리
             success, new_model, error_msg = handle_openai_error(e, st.session_state["model_option_general"])
-            if success:
+            
+            # 500 에러는 서버 문제이므로 특별 처리
+            if isinstance(e, InternalServerError):
+                st.warning(error_msg)
+                st.info("⏳ 서버 문제가 해결될 때까지 잠시 기다려주세요. (보통 몇 초 이내에 해결됩니다)")
+                return
+            
+            if success and new_model:
                 # 새로운 모델로 재시도
                 st.warning(error_msg)
                 st.info("🔄 새로운 모델로 질문을 다시 시도해주세요.")
+                
+                # 에이전트를 새로운 모델로 재생성
+                try:
+                    # API 키 재설정 (사이드바에서 변경된 경우)
+                    set_openai_api_key()
+
+                    # 에이전트 재생성
+                    st.session_state["agent_with_UploadData"] = create_agent(
+                        dataframe=st.session_state["df_UploadData"],
+                        selected_model=new_model,
+                        prefix_prompt=AGENT_PREFIX_PROMPT,
+                        postfix_prompt=AGENT_POSTFIX_PROMPT,
+                        shared_python_tool=st.session_state.get("python_tool", None),
+                    )
+                    st.success(f"✅ 에이전트가 {new_model} 모델로 재생성되었습니다!")
+                    st.info("🔄 질문을 다시 시도해주세요.")
+                except Exception as agent_error:
+                    st.error(f"❌ 에이전트 재생성 실패: {str(agent_error)}")
                 return
             else:
-                # 모든 모델 실패
+                # 모든 모델 실패 또는 모델 전환 불가
                 st.error(error_msg)
-                st.info("⚠️ 잠시 후 다시 시도해주세요.")
                 return
         except Exception as e:
             # 기타 에러 처리
             st.error(f"❌ 예상치 못한 오류가 발생했습니다: {str(e)}")
-            st.info("⚠️ 잠시 후 다시 시도해주세요.")
             return
 
     # 응답 출력
@@ -567,6 +550,23 @@ if st.session_state["logged_in"]:
         render_conversation_history(s3_manager, conversation_manager, message_manager)
 
     #-------메인 로직 설정 ----------#
+    # API 키가 업데이트된 경우, 에이전트를 최신 키로 재생성
+    if st.session_state.get("api_key_updated"):
+        if st.session_state.get("df_UploadData") is not None:
+            # 최신 키 적용
+            set_openai_api_key()
+            # 기존 에이전트 제거 후 재생성
+            st.session_state["agent_with_UploadData"] = create_agent(
+                dataframe=st.session_state["df_UploadData"],
+                selected_model=st.session_state["model_option_general"],
+                api_key=st.session_state["openai_api_key"],
+                prefix_prompt=AGENT_PREFIX_PROMPT,
+                postfix_prompt=AGENT_POSTFIX_PROMPT,
+                shared_python_tool=st.session_state.get("python_tool", None),
+            )
+        # 플래그 리셋
+        st.session_state["api_key_updated"] = False
+
     # 데이터 분석 시작 버튼 (메인 화면) - 에이전트가 생성되지 않은 경우에만 표시
     if uploaded_file is not None and st.session_state["uploaded_data"] is not None and "agent_with_UploadData" not in st.session_state:
         # 업로드된 데이터 미리보기
@@ -631,46 +631,14 @@ if st.session_state["logged_in"]:
             }
 
             # Agent 생성 - 같은 python_tool 사용하도록
+            # API 키 재설정 (사이드바에서 변경된 경우)
+            set_openai_api_key()
+            
             st.session_state["agent_with_UploadData"] = create_agent(
-                loaded_data,
-                st.session_state["model_option_general"],
-                prefix_prompt="""
-    이 AI는 데이터 분석을 도와주는 도우미입니다.
-    - 어려운 용어나 복잡한 개념 대신 쉽고 친근한 말로 설명해주세요
-    - 분석 결과를 실생활과 연결해서 설명해주세요
-    - 궁금한 점이 있으면 언제든지 물어보세요!
-
-    **중요한 시각화 규칙**:
-    - 그래프를 그릴 때는 한글 폰트 설정을 하지 마세요 (plt.rcParams['font.family'] = ... 금지)
-    - 한글 폰트는 이미 전역으로 설정되어 있으니 바로 matplotlib과 seaborn을 사용하세요
-    - 시각화 코드에서 폰트 관련 설정은 절대 포함하지 마세요
-
-    **중요한 코드 작성 규칙**:
-    - 함수를 정의할 때 함수 외부의 변수를 참조하지 마세요
-    - 함수 내부에서 필요한 모든 변수를 정의하거나 파라미터로 전달하세요
-    - apply() 함수를 사용할 때는 가능한 람다 함수를 사용하세요
-    - 예시:
-    # 잘못된 방법:
-    # keywords = ['a', 'b']
-    # def check(x):
-    #     return any(k in x for k in keywords)  # 외부 변수 참조
-    
-    # 올바른 방법 1 - 함수 내부 정의:
-    # def check(x):
-    #     keywords = ['a', 'b']  # 함수 내부에 정의
-    #     return any(k in x for k in keywords)
-    
-    # 올바른 방법 2 - 람다 사용:
-    # df['col'].apply(lambda x: '분류1' if 'a' in x else '분류2')""",
-                postfix_prompt="""
-    <출력 형식>
-    분석 결과를 설명할 때는 다음 형식을 따라주세요:
-
-    - **핵심 내용**: (한 줄로 핵심 내용을 요약해주세요)
-    - **상세 설명**: (핵심 내용에 대한 상세 설명을 3문장이 넘지 않게, 고등학생이 이해하기 쉽게 구체적으로 설명해주세요)
-
-    답변은 친근하고 격려하는 톤으로 작성해주세요.
-    </출력 형식>""",
+                dataframe=loaded_data,
+                selected_model=st.session_state["model_option_general"],
+                prefix_prompt=AGENT_PREFIX_PROMPT,
+                postfix_prompt=AGENT_POSTFIX_PROMPT,
                 shared_python_tool=st.session_state.get("python_tool", None),  # 중요: 같은 도구 전달
             )  # 에이전트 생성
 

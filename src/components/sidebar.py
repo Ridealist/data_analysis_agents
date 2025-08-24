@@ -1,5 +1,6 @@
 import time
 import uuid
+import os
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -96,16 +97,16 @@ def load_messages_from_db(conversation_id: str, message_manager: MessageManager,
 #--------------------------------#
 #      Sidebar Configuration     #
 #--------------------------------#
-def render_model_setting():
+def render_system_setting():
     with st.sidebar:
         st.caption(f"👤 {st.session_state['username']}님 로그인됨")
 
-        with st.expander("🧠 데이터 분석 모델 설정", expanded=False):
+        with st.expander("⚙️ 시스템 설정", expanded=False):
 
             model_option_general = st.selectbox(
-                label="모델 선택지",
+                label="🧠 모델 선택지",
                 options=["gpt-4o-mini", "gpt-4.1-mini", "gpt-4o", "gpt-4.1"],
-                index=0,
+                index=1,
                 help="데이터 분석을 위한 OpenAI 모델을 설정합니다."
             )
 
@@ -114,7 +115,25 @@ def render_model_setting():
                 st.success(f"모델 설정 완료: {model_option_general}")
                 time.sleep(1)
                 st.rerun()
-        
+
+            openai_api_key = st.text_input(
+                "🔑 API 키",
+                type="password",
+                placeholder="OpenAI API 키를 입력하세요",
+                help="데이터 분석 요청을 위한 OpenAI API 키를 설정합니다.",
+                key="api_key_input"
+            )
+            if openai_api_key:
+                # 세션 상태에 저장
+                st.session_state["openai_api_key"] = openai_api_key
+                # 환경 변수에도 즉시 설정
+                os.environ["OPENAI_API_KEY"] = openai_api_key
+                # 성공 메시지 표시
+                st.success("✅ API 키가 설정되었습니다!")
+                # 에이전트 재생성을 위한 플래그 설정
+                st.session_state["api_key_updated"] = True
+                time.sleep(1)
+
 def render_conversation_history(s3_manager: S3Manager, conversation_manager: ConversationManager, message_manager: MessageManager):
     with st.sidebar:
         st.divider()
