@@ -359,9 +359,6 @@ def create_agent(
         st.error("❌ OpenAI API 키가 설정되지 않았습니다.")
         st.sidebar.error("⚠️ 사이드바에서 API 키를 설정해주세요.")
         return None
-    
-    # API 키가 있는 경우 성공 메시지
-    st.sidebar.success(f"✅ API 키 사용: {len(api_key)}자")
 
     # 공유 python_tool 전달
     shared_tool = st.session_state.get("python_tool", None)
