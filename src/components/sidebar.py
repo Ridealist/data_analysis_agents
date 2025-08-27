@@ -143,7 +143,6 @@ def render_conversation_history(s3_manager: S3Manager, conversation_manager: Con
 
         # 대화 목록 표시 (사용자 ID가 있는 경우)
         if hasattr(st.session_state, 'username'):
-            st.caption(f"👤 {st.session_state['username']}님 로그인됨")
             try:
                 conversations = conversation_manager.get_user_conversations(st.session_state.username)
                 

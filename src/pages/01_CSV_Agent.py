@@ -19,9 +19,7 @@ from threading import Thread
 
 # OpenAI 에러 처리 관련 import
 from langchain_experimental.tools import PythonAstREPLTool
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_openai import ChatOpenAI
-from openai import OpenAIError, InternalServerError
+from openai import OpenAI, OpenAIError, InternalServerError
 
 # 데이터베이스 관련 import
 from src.components.dynamo import DynamoDBManager, S3Manager, ConversationManager, MessageManager
@@ -30,6 +28,9 @@ from src.components.sidebar import render_conversation_history
 from src.components.llm import set_openai_api_key, handle_openai_error
 from src.prompts.agent_prompts import AGENT_PREFIX_PROMPT, AGENT_POSTFIX_PROMPT
 from src.utils.dataframe_handler import safe_dataframe_display
+
+
+from src.agency.Tutor import AgencyTutor
 
 # 경고 메시지 숨기기
 warnings.filterwarnings('ignore')
@@ -175,7 +176,7 @@ def thread_safe_ask(query: str, agent, python_tool, main_queue: Queue, error_que
         main_queue.put(None)
 
 
-def thread_safe_thinking(query: str, thinking_chain, sidebar_queue: Queue, error_queue: Queue):
+def thread_safe_thinking(query: str, thinking_chain, sidebar_messages_history, sidebar_queue: Queue, error_queue: Queue):
     """
     Thinking chain을 Thread-safe하게 실행
     
@@ -187,14 +188,29 @@ def thread_safe_thinking(query: str, thinking_chain, sidebar_queue: Queue, error
     """
     try:
         response = ""
-        for chunk in thinking_chain.stream({"input": query}):
-            if hasattr(chunk, 'content'):
+        output, intent, assessment = thinking_chain.get_response_stream(sidebar_messages_history, query)
+
+        for chunk in output:
+            # ChatCompletionChunk에서 실제 텍스트만 추출
+            if hasattr(chunk, 'choices') and chunk.choices:
+                delta = chunk.choices[0].delta
+                if hasattr(delta, 'content') and delta.content:
+                    content = delta.content
+                    response += content
+                    sidebar_queue.put(("TEXT", content))
+            # 기존 fallback 로직 유지
+            elif hasattr(chunk, 'content'):
                 content = chunk.content
-            else:
-                content = str(chunk)
+                if content:
+                    response += content
+                    sidebar_queue.put(("TEXT", content))
+            # if hasattr(chunk, 'content'):
+            #     content = chunk.content
+            # else:
+            #     content = str(chunk)
             
-            response += content
-            sidebar_queue.put(("TEXT", content))
+            # response += content
+            # sidebar_queue.put(("TEXT", content))
         
         sidebar_queue.put(None)  # 종료 신호
         
@@ -258,6 +274,7 @@ def parallel_execution_manager(user_input: str, agent, python_tool, thinking_cha
             thread_safe_thinking,
             user_input,
             thinking_chain,
+            st.session_state["messages_sidebar_UploadData"],
             sidebar_queue,
             error_queue
         )
@@ -400,26 +417,13 @@ def update_ui_from_queues(main_queue: Queue, sidebar_queue: Queue, error_queue: 
 @st.cache_resource
 def create_thinking_chain(api_key):
     """생각할 거리 제공용 체인 생성"""
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", """당신은 소크라테스식 문답법을 사용하는 교육자입니다.
-        학생의 데이터 분석 질문이나 결과를 듣고, 다음을 제공하세요:
-        
-        1. 데이터를 다른 관점에서 볼 수 있는 통찰력 있는 질문 1-2개
-        2. 추가로 탐색해볼 만한 분석 방향 제안
-        3. 결과의 실무적 의미나 활용 방안
-        
-        질문은 구체적이고 실행 가능해야 합니다."""),
-        ("human", "{input}")
-    ])
     
-    llm = ChatOpenAI(
-        model="gpt-4o-mini",
-        temperature=0.8,
-        openai_api_key=api_key,
-        streaming=True
-    )
+    client = OpenAI(api_key=api_key)
+    model = "gpt-4o-2024-05-13"
+
+    st.session_state['Tutor'] = AgencyTutor(client, model=model)
     
-    return prompt | llm
+    return st.session_state['Tutor']
 
 
 #--------------------------------#
@@ -867,9 +871,9 @@ if st.session_state["logged_in"]:
     with st.sidebar:
         #TODO chat 인터페이스 제거 검토
         # render_chat_interface()
-        
+        st.caption(f"👤 {st.session_state['username']}님 로그인됨")
         # Thinking Chain 응답용 컨테이너
-        st.header("💭 추가 분석 아이디어")
+        st.header("🤔 학습 에이전트의 조언")
         thinking_container = st.container(height=400)
         
         # 고정 placeholder 생성 또는 재사용
@@ -1198,4 +1202,4 @@ else:
     st.error("먼저 로그인을 해주세요!")
 
 
-st.write(st.session_state)
+# st.write(st.session_state)
