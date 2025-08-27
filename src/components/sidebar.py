@@ -7,6 +7,17 @@ import matplotlib.pyplot as plt
 
 from src.components.dynamo import ConversationManager, S3Manager, timestamp_to_datetime, MessageManager
 from src.components.dataclass import MessageType
+from langchain_core.messages import ChatMessage
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_openai import ChatOpenAI
+from langchain_core.runnables import RunnableWithMessageHistory
+from langchain_core.chat_history import BaseChatMessageHistory
+from pydantic import BaseModel, Field
+from typing import List
+from langchain_core.messages import BaseMessage
+from src.components.llm import set_openai_api_key
+
+store = {}
 
 
 def load_messages_from_db(conversation_id: str, message_manager: MessageManager, s3_manager: S3Manager):
@@ -97,48 +108,11 @@ def load_messages_from_db(conversation_id: str, message_manager: MessageManager,
 #--------------------------------#
 #      Sidebar Configuration     #
 #--------------------------------#
-def render_system_setting():
-    with st.sidebar:
-        st.caption(f"👤 {st.session_state['username']}님 로그인됨")
-
-        with st.expander("⚙️ 시스템 설정", expanded=False):
-
-            model_option_general = st.selectbox(
-                label="🧠 모델 선택지",
-                options=["gpt-4o-mini", "gpt-4.1-mini", "gpt-4o", "gpt-4.1"],
-                index=1,
-                help="데이터 분석을 위한 OpenAI 모델을 설정합니다."
-            )
-
-            if model_option_general != st.session_state["model_option_general"]:
-                st.session_state["model_option_general"] = model_option_general
-                st.success(f"모델 설정 완료: {model_option_general}")
-                time.sleep(1)
-                st.rerun()
-
-            openai_api_key = st.text_input(
-                "🔑 API 키",
-                type="password",
-                placeholder="OpenAI API 키를 입력하세요",
-                help="데이터 분석 요청을 위한 OpenAI API 키를 설정합니다.",
-                key="api_key_input"
-            )
-            if openai_api_key:
-                # 세션 상태에 저장
-                st.session_state["openai_api_key"] = openai_api_key
-                # 환경 변수에도 즉시 설정
-                os.environ["OPENAI_API_KEY"] = openai_api_key
-                # 성공 메시지 표시
-                st.success("✅ API 키가 설정되었습니다!")
-                # 에이전트 재생성을 위한 플래그 설정
-                st.session_state["api_key_updated"] = True
-                time.sleep(1)
-
 def render_conversation_history(s3_manager: S3Manager, conversation_manager: ConversationManager, message_manager: MessageManager):
     with st.sidebar:
         st.divider()
         st.header("💬 대화 기록")
-        
+
         # 새 대화 시작 버튼
         if st.button("➕ 새 대화 시작", use_container_width=True):
             st.session_state.session_uuid = str(uuid.uuid4())
@@ -169,6 +143,7 @@ def render_conversation_history(s3_manager: S3Manager, conversation_manager: Con
 
         # 대화 목록 표시 (사용자 ID가 있는 경우)
         if hasattr(st.session_state, 'username'):
+            st.caption(f"👤 {st.session_state['username']}님 로그인됨")
             try:
                 conversations = conversation_manager.get_user_conversations(st.session_state.username)
                 
@@ -216,12 +191,127 @@ def render_conversation_history(s3_manager: S3Manager, conversation_manager: Con
                 st.error(f"대화 목록 로드 실패: {e}")
 
 
-def render_data_info(uploaded_data: pd.DataFrame):
-    with st.sidebar:
 
-        # 현재 데이터 상태 표시
-        if st.session_state.get("data_applied", False):
-            if "uploaded_data" in st.session_state and st.session_state["uploaded_data"] is not None:
-                st.caption(f"데이터 크기: {st.session_state['uploaded_data'].shape[0]}행 × {st.session_state['uploaded_data'].shape[1]}열")
-        else:
-            st.caption(f"데이터 크기: {uploaded_data.shape[0]}행 × {uploaded_data.shape[1]}열")
+#--------------------------------#
+#      LLM 체인 생성 함수          #
+#--------------------------------#
+##TODO 추후 SRL_Agent 로직 적용
+
+class InMemoryHistory(BaseChatMessageHistory, BaseModel):
+    """In memory implementation of chat message history."""
+
+    messages: List[BaseMessage] = Field(default_factory=list)
+
+    def add_messages(self, messages: List[BaseMessage]) -> None:
+        """Add a list of messages to the store"""
+        self.messages.extend(messages)
+
+    def clear(self) -> None:
+        self.messages = []
+
+
+def get_by_session_id(session_id: str) -> BaseChatMessageHistory:
+    if session_id not in store:
+        store[session_id] = InMemoryHistory()
+    return store[session_id]
+
+
+# 사이드바 시스템 체인 생성
+def generate_chain(model_name="gpt-4o-mini"):
+    # API 키 설정
+    if not set_openai_api_key():
+        st.error("❌ OpenAI API 키가 설정되지 않았습니다.")
+        return None
+    
+    # 현재 선택된 operation 값 가져오기
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", 
+         """당신은 친근하고 대화형 학습을 돕는 **물리 튜터**입니다."""
+        ),
+        MessagesPlaceholder(variable_name="history"),
+        ("human", "{input}")
+    ])
+
+    # 객체 생성
+    llm = ChatOpenAI(
+        temperature=0,
+        model_name=model_name,
+        openai_api_key=os.environ.get("OPENAI_API_KEY")
+    )
+
+    chain = prompt | llm
+    chain_with_history = RunnableWithMessageHistory(
+        chain,
+        get_by_session_id,
+        input_messages_key="input",
+        history_messages_key="history",
+    )
+
+    return chain_with_history
+
+
+def render_chat_interface():
+    # 추천 질문 사용 여부 토글 추가
+    selected_model = "gpt-4o-mini"
+
+    st.header("🤓 튜터와 대화하기")
+    messages = st.container(height=400)
+
+    # 이전 대화를 출력
+    def print_messages():
+        for chat_message in st.session_state["tutor_messages"]:
+            messages.chat_message(chat_message.role).write(chat_message.content)
+
+    # 새로운 메시지를 추가
+    def add_message(role, message):
+        st.session_state["tutor_messages"].append(ChatMessage(role=role, content=message))
+
+    # 초기 대화 기록 추가
+    if len(st.session_state["tutor_messages"]) == 0:
+        messages.chat_message("assistant").write("안녕하세요! 저는 AI 탐구도우미입니다. 무엇을 도와드릴까요?")
+    else:
+        pass
+
+    # 이전 대화 기록 출력
+    print_messages()
+
+    # 사용자의 입력
+    user_input = st.chat_input("🤓 AI 튜터에게 궁금한 내용을 물어보세요!")
+
+    # 만약에 사용자 입력이 들어오면...
+    if user_input:
+        # 답변 요청
+        conv_chain = generate_chain(selected_model)
+        
+        # API 키가 설정되지 않은 경우 처리
+        if conv_chain is None:
+            messages.chat_message("assistant").write("⚠️ OpenAI API 키가 설정되지 않았습니다. ⚙️ 시스템 설정에서 API 키를 입력해주세요.")
+            return
+        
+        # 사용자의 입력
+        messages.chat_message("user").write(user_input)
+
+        with messages.chat_message("assistant"):
+            # 빈 공간(컨테이너)을 만들어서, 여기에 토큰을 스트리밍 출력한다.
+            container = st.empty()
+            #TODO 추후 비동기 처리 적용
+            #TODO 추후 에러 처리 적용
+            try:
+                generator = conv_chain.stream(
+                    {
+                        "input": user_input,
+                    },
+                    config={"configurable": {"session_id": "ab12"}}
+                )
+                ai_answer = ""
+                for token in generator:
+                    ai_answer += token.content
+                    container.markdown(ai_answer)
+                
+                # 대화기록을 저장한다.
+                add_message("user", user_input)
+                add_message("assistant", ai_answer)
+            except Exception as e:
+                error_msg = f"❌ AI 응답 생성 중 오류가 발생했습니다: {str(e)}"
+                container.markdown(error_msg)
+                add_message("assistant", error_msg)

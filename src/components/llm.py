@@ -1,6 +1,8 @@
 import os
 import streamlit as st
 from openai import RateLimitError, APITimeoutError, InternalServerError
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_openai import ChatOpenAI
 
 #-----------------------------#
 #      API 키 설정 함수        #
