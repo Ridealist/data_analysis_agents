@@ -22,14 +22,14 @@ from langchain_experimental.tools import PythonAstREPLTool
 from openai import OpenAI, OpenAIError, InternalServerError
 
 # 데이터베이스 관련 import
-from src.components.dynamo import DynamoDBManager, S3Manager, ConversationManager, MessageManager
+from src.components.dynamo import DynamoDBManager, S3Manager, ConversationManager, MessageManager, AgencyConversationManager
 from src.components.dataclass import MessageRole, MessageType
 from src.components.sidebar import render_conversation_history
 from src.components.llm import set_openai_api_key, handle_openai_error
 from src.prompts.agent_prompts import AGENT_PREFIX_PROMPT, AGENT_POSTFIX_PROMPT
 from src.utils.dataframe_handler import safe_dataframe_display
 
-
+# Agency Tutor 관련 import
 from src.agency.Tutor import AgencyTutor
 
 # 경고 메시지 숨기기
@@ -176,7 +176,7 @@ def thread_safe_ask(query: str, agent, python_tool, main_queue: Queue, error_que
         main_queue.put(None)
 
 
-def thread_safe_thinking(query: str, thinking_chain, sidebar_messages_history, sidebar_queue: Queue, error_queue: Queue):
+def thread_safe_thinking(query: str, thinking_chain, sidebar_messages_history, sidebar_queue: Queue, error_queue: Queue, conversation_id: str = None):
     """
     Thinking chain을 Thread-safe하게 실행
     
@@ -211,6 +211,10 @@ def thread_safe_thinking(query: str, thinking_chain, sidebar_messages_history, s
             
             # response += content
             # sidebar_queue.put(("TEXT", content))
+        
+        # Agency 응답을 데이터베이스에 저장
+        if response:
+            save_agency_response(response, intent, assessment, conversation_id)
         
         sidebar_queue.put(None)  # 종료 신호
         
@@ -274,9 +278,10 @@ def parallel_execution_manager(user_input: str, agent, python_tool, thinking_cha
             thread_safe_thinking,
             user_input,
             thinking_chain,
-            st.session_state["messages_sidebar_UploadData"],
+            st.session_state.get("messages_sidebar_UploadData"),
             sidebar_queue,
-            error_queue
+            error_queue,
+            st.session_state.get("conversation_id")
         )
     
     return main_queue, sidebar_queue, error_queue
@@ -419,7 +424,7 @@ def create_thinking_chain(api_key):
     """생각할 거리 제공용 체인 생성"""
     
     client = OpenAI(api_key=api_key)
-    model = "gpt-4o-2024-05-13"
+    model = "gpt-4.1"
 
     st.session_state['Tutor'] = AgencyTutor(client, model=model)
     
@@ -454,13 +459,16 @@ def init_managers():
         conversation_manager = ConversationManager(dynamo_manager)
         message_manager = MessageManager(dynamo_manager)
         
-        return dynamo_manager, s3_manager, conversation_manager, message_manager
+        # Agency 대화 매니저 초기화
+        agency_conversation_manager = AgencyConversationManager(dynamo_manager)
+        
+        return dynamo_manager, s3_manager, conversation_manager, message_manager, agency_conversation_manager
     except Exception as e:
         st.error(f"매니저 초기화 실패: {e}")
-        return None, None, None, None
+        return None, None, None, None, None
 
 # 매니저 인스턴스 가져오기
-dynamo_manager, s3_manager, conversation_manager, message_manager = init_managers()
+dynamo_manager, s3_manager, conversation_manager, message_manager, agency_conversation_manager = init_managers()
 
 #----------------------------------------#
 #         Streamlit Session State        #
@@ -476,10 +484,10 @@ if "logged_in" not in st.session_state:
 
 # 데이터베이스 관련 세션 상태 추가
 if "session_uuid" not in st.session_state:
-    st.session_state.session_uuid = str(uuid.uuid4())
+    st.session_state["session_uuid"] = str(uuid.uuid4())
 
 if "conversation_id" not in st.session_state:
-    st.session_state.conversation_id = None
+    st.session_state["conversation_id"] = None
 
 # 사이드바 튜터 대화 기록 저장용 (튜터 대화만)
 if "messages_sidebar_UploadData" not in st.session_state:
@@ -516,7 +524,7 @@ def add_message_main(role: MessageRole, content: List[Union[MessageType, str]]):
             s3_path = s3_manager.upload_to_s3(
                 message_content, 
                 'dataframe', 
-                st.session_state.conversation_id
+                st.session_state.get("conversation_id")
             )
             if s3_path:
                 db_content_type = 'dataframe_s3'
@@ -528,7 +536,7 @@ def add_message_main(role: MessageRole, content: List[Union[MessageType, str]]):
             s3_path = s3_manager.upload_to_s3(
                 message_content,
                 'figure',
-                st.session_state.conversation_id
+                st.session_state.get("conversation_id")
             )
             if s3_path:
                 db_content_type = 'figure_s3'
@@ -549,11 +557,17 @@ def add_message_main(role: MessageRole, content: List[Union[MessageType, str]]):
         
         # DB에 저장
         if db_content_type and db_content:
+            # AI 답변인 경우 모델 정보도 함께 저장
+            llm_model = None
+            if role == MessageRole.ASSISTANT:
+                llm_model = st.session_state.get("model_option_general", "gpt-4.1-mini")
+            
             message_manager.save_message(
-                st.session_state.conversation_id,
+                st.session_state.get("conversation_id"),
                 role,
                 db_content_type,
-                db_content
+                db_content,
+                llm_model
             )
     
     # 세션 상태에는 원본 객체 그대로 저장 (S3 경로가 아닌)
@@ -562,6 +576,39 @@ def add_message_main(role: MessageRole, content: List[Union[MessageType, str]]):
         messages[-1][1].extend([content])
     else:
         messages.append([role, [content]])
+
+
+def save_agency_response(output: str, intent: str, assessment: str, conversation_id: str = None):
+    """Agency 응답 (output, intent, assessment)을 데이터베이스에 저장"""
+    conv_id = conversation_id or st.session_state.get("conversation_id")
+    if conv_id and agency_conversation_manager:
+        try:
+            success = agency_conversation_manager.save_agency_response(
+                conv_id,
+                output,
+                intent,
+                assessment
+            )
+            if success:
+                print(f"Agency 응답 저장 성공: {intent}")
+            else:
+                print("Agency 응답 저장 실패")
+        except Exception as e:
+            print(f"Agency 응답 저장 중 오류: {e}")
+
+
+def save_user_input_to_agency(user_input: str):
+    """사용자 입력을 agency_conversations 테이블에 저장"""
+    conv_id = st.session_state.get("conversation_id")
+    if conv_id and agency_conversation_manager:
+        try:
+            agency_conversation_manager.save_user_input(
+                conv_id,
+                user_input
+            )
+        except Exception as e:
+            pass
+
 
 def print_messages_main():
     """저장된 메시지를 화면에 출력하는 함수"""
@@ -869,8 +916,6 @@ if st.session_state["logged_in"]:
 
     #-------Sidebar 설정 ----------#
     with st.sidebar:
-        #TODO chat 인터페이스 제거 검토
-        # render_chat_interface()
         st.caption(f"👤 {st.session_state['username']}님 로그인됨")
         # Thinking Chain 응답용 컨테이너
         st.header("🤔 학습 에이전트의 조언")
@@ -1015,11 +1060,11 @@ if st.session_state["logged_in"]:
                     add_message_main(MessageRole.ASSISTANT, [MessageType.ERROR, warning_msg])
                 
                 current_conversation = conversation_manager.get_or_create_conversation(
-                    st.session_state.session_uuid,
+                    st.session_state.get("session_uuid"),
                     user_id
                 )
                 if current_conversation:
-                    st.session_state.conversation_id = current_conversation['session_uuid']
+                    st.session_state["conversation_id"] = current_conversation["session_uuid"]
 
             
             # 데이터 정보 표시 (한글로)
@@ -1123,6 +1168,9 @@ if st.session_state["logged_in"]:
             st.chat_message("user").write(user_input)
             add_message_main(MessageRole.USER, [MessageType.TEXT, user_input])
 
+            # Agency 테이블에 사용자 입력 저장
+            save_user_input_to_agency(user_input)
+
             # 사이드바 대화 기록에서 'user'의 메시지 추가
             st.session_state["messages_sidebar_UploadData"].append({
                 "role": "user",
@@ -1200,6 +1248,3 @@ if st.session_state["logged_in"]:
 
 else:
     st.error("먼저 로그인을 해주세요!")
-
-
-# st.write(st.session_state)

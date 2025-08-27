@@ -5,6 +5,7 @@ import pandas as pd
 import io
 import traceback
 import uuid
+import json
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 from decimal import Decimal
@@ -450,7 +451,7 @@ class MessageManager:
             st.error(f"메시지 로드 오류: {e}")
             return []
     
-    def save_message(self, conversation_id: str, role: str, content_type: str, content: str) -> bool:
+    def save_message(self, conversation_id: str, role: str, content_type: str, content: str, llm_model: str = None) -> bool:
         """
         메시지 저장
         
@@ -459,6 +460,7 @@ class MessageManager:
             role: 메시지 역할 (user/assistant)
             content_type: 콘텐츠 타입
             content: 메시지 내용
+            llm_model: 사용된 LLM 모델명 (assistant 역할일 때만 사용)
         
         Returns:
             bool: 저장 성공 여부
@@ -473,6 +475,11 @@ class MessageManager:
                 'content_type': content_type,
                 'content': content
             }
+            
+            # AI 답변인 경우 모델 정보 추가
+            if role == 'assistant' and llm_model:
+                message_item['LLM_model'] = llm_model
+                
             self.messages_table.put_item(Item=message_item)
             
             # 대화 업데이트 시간 갱신
@@ -515,6 +522,142 @@ class MessageManager:
     def _timestamp_to_datetime(self, timestamp: Decimal) -> datetime:
         """DynamoDB timestamp를 datetime으로 변환"""
         return datetime.fromtimestamp(float(timestamp))
+
+class AgencyConversationManager:
+    """Agency 대화 관리 클래스 - output, intent, assessment 저장용"""
+    
+    def __init__(self, dynamo_manager: DynamoDBManager):
+        """
+        Agency 대화 매니저 초기화
+        
+        Args:
+            dynamo_manager: DynamoDB 매니저 인스턴스
+        """
+        self.dynamo_manager = dynamo_manager
+        self.agency_table_name = "agency_conversations"
+        
+        # Agency 테이블 참조
+        self.agency_table = self.dynamo_manager.dynamodb.Table(self.agency_table_name)
+        
+        # 테이블 초기화
+        self.create_agency_table_if_not_exists()
+    
+    def create_agency_table_if_not_exists(self):
+        """Agency 대화 테이블이 없으면 생성"""
+        existing_tables = [table.name for table in self.dynamo_manager.dynamodb.tables.all()]
+        
+        if self.agency_table_name not in existing_tables:
+            try:
+                self.dynamo_manager.dynamodb.create_table(
+                    TableName=self.agency_table_name,
+                    KeySchema=[
+                        {'AttributeName': 'conversation_id', 'KeyType': 'HASH'},
+                        {'AttributeName': 'timestamp', 'KeyType': 'RANGE'}
+                    ],
+                    AttributeDefinitions=[
+                        {'AttributeName': 'conversation_id', 'AttributeType': 'S'},
+                        {'AttributeName': 'timestamp', 'AttributeType': 'N'}
+                    ],
+                    BillingMode='PAY_PER_REQUEST'
+                )
+                print(f"Created table {self.agency_table_name}")
+            except ClientError as e:
+                if e.response['Error']['Code'] != 'ResourceInUseException':
+                    raise
+    
+    def save_agency_response(self, conversation_id: str, output: str, intent: List, assessment: str, llm_model: str = 'gpt-4.1') -> bool:
+        """
+        Agency 응답 저장 (output, intent, assessment)
+        
+        Args:
+            conversation_id: 대화 ID
+            output: AI 응답 내용
+            intent: 의도 분석 (List)
+            assessment: 평가 결과 (JSON 문자열)
+            llm_model: 사용된 LLM 모델명 (기본값: 'gpt-4.1')
+        
+        Returns:
+            bool: 저장 성공 여부
+        """
+        try:
+            now = datetime.now(timezone.utc)
+            
+            # assessment가 JSON 문자열인지 확인하고 파싱
+            try:
+                assessment_data = json.loads(assessment) if assessment else {}
+                assessment_json = json.dumps(assessment_data, ensure_ascii=False)
+            except (json.JSONDecodeError, TypeError):
+                # JSON 파싱 실패 시 원본 문자열 그대로 저장
+                assessment_json = assessment
+            
+            # intent에 Enum(TutorAct) 등이 포함될 수 있으므로 JSON 직렬화 가능한 형태로 변환
+            def serialize_intent(value):
+                try:
+                    from enum import Enum
+                    if isinstance(value, Enum):
+                        return value.name
+                    if isinstance(value, list):
+                        return [serialize_intent(v) for v in value]
+                    if isinstance(value, dict):
+                        return {k: serialize_intent(v) for k, v in value.items()}
+                    return value
+                except Exception:
+                    return str(value)
+
+            safe_intent = serialize_intent(intent)
+
+            agency_item = {
+                'conversation_id': conversation_id,
+                'timestamp': self._datetime_to_timestamp(now),
+                'message_id': str(uuid.uuid4()),
+                'role': 'assistant',
+                'content': output,
+                'intent': json.dumps(safe_intent, ensure_ascii=False),
+                'assessment': assessment_json,
+                'created_at': self._datetime_to_timestamp(now),
+                'LLM_model': llm_model
+            }
+            self.agency_table.put_item(Item=agency_item)
+            return True
+        except Exception as e:
+            st.error(f"Agency 응답 저장 오류: {e}")
+            traceback.print_exc()
+            return False
+    
+    def save_user_input(self, conversation_id: str, user_input: str) -> bool:
+        """
+        사용자 입력 저장
+        
+        Args:
+            conversation_id: 대화 ID
+            user_input: 사용자 입력 내용
+        
+        Returns:
+            bool: 저장 성공 여부
+        """
+        try:
+            now = datetime.now(timezone.utc)
+            agency_item = {
+                'conversation_id': conversation_id,
+                'timestamp': self._datetime_to_timestamp(now),
+                'message_id': str(uuid.uuid4()),
+                'role': 'user',
+                'content': user_input,
+                'intent': '',
+                'assessment': '',
+                'created_at': self._datetime_to_timestamp(now),
+                'LLM_model': ''
+            }
+            self.agency_table.put_item(Item=agency_item)
+            return True
+        except Exception as e:
+            st.error(f"사용자 입력 저장 오류: {e}")
+            traceback.print_exc()
+            return False
+    
+    def _datetime_to_timestamp(self, dt: datetime) -> Decimal:
+        """datetime을 DynamoDB timestamp(Decimal)로 변환"""
+        return Decimal(str(dt.timestamp()))
 
 # 유틸리티 함수들
 def datetime_to_timestamp(dt: datetime) -> Decimal:
