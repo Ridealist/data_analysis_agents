@@ -32,10 +32,10 @@ if st.button("Log in", type="primary"):
             st.session_state["username"] = username
             st.session_state["user_id"] = users_info[username]["userID"]
             
-            # 01_CSV_Agent.py에서 필요한 session state들 초기화
+            # 01_Prepro_Agent.py에서 필요한 session state들 초기화
             st.session_state["session_uuid"] = str(uuid.uuid4())
             st.session_state["conversation_id"] = None
             
             st.success(f"로그인 성공! 환영합니다, {username}님!")
             time.sleep(0.5)
-            st.switch_page("src/pages/01_CSV_Agent.py")
+            st.switch_page("src/pages/01_Prepro_Agent.py")

@@ -38,15 +38,15 @@ class MessageType(Enum):
 def add_message_main(role: MessageRole, content_list):
     """메시지를 세션에 추가하는 함수"""
     try:
-        if "messages_SchoolFood" not in st.session_state:
-            st.session_state["messages_SchoolFood"] = []
+        if "messages_UploadData" not in st.session_state:
+            st.session_state["messages_UploadData"] = []
         
         message = {
             "role": role.value,
             "content": content_list,
             "timestamp": datetime.now().isoformat()
         }
-        st.session_state["messages_SchoolFood"].append(message)
+        st.session_state["messages_UploadData"].append(message)
         
         # 데이터베이스 로깅 시도 (옵션)
         try:
@@ -66,9 +66,6 @@ def add_message_main(role: MessageRole, content_list):
     except Exception as e:
         print(f"메시지 추가 실패: {e}")
 ########################################################
-
-
-load_dotenv()
 
 
 class DataAnalysisAgent:
@@ -171,15 +168,15 @@ class DataAnalysisAgent:
                     # df가 현재 도구의 locals에 없으면 추가
                     if 'df' not in python_tool.locals:
                         python_tool.locals['df'] = self.df
-                    if 'df_SchoolFood' not in python_tool.locals:
-                        python_tool.locals['df_SchoolFood'] = self.df
+                    if 'df_UploadData' not in python_tool.locals:
+                        python_tool.locals['df_UploadData'] = self.df
                     python_tool.locals['sns'] = sns
                     python_tool.locals['plt'] = plt
                     python_tool.locals['np'] = np
                     python_tool.locals['pd'] = pd
                 else:
                     python_tool = PythonAstREPLTool(
-                        locals={"df": self.df, "df_SchoolFood": self.df, "sns": sns, "plt": plt, "np": np, "pd": pd}
+                        locals={"df": self.df, "df_UploadData": self.df, "sns": sns, "plt": plt, "np": np, "pd": pd}
                     )
 
                 result = python_tool.invoke(code)

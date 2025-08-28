@@ -2,6 +2,7 @@ numpy
 pandas
 matplotlib
 seaborn
+openpyxl
 
 PyPDF2
 pypandoc[pandoc]

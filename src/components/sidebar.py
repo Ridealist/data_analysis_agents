@@ -20,14 +20,17 @@ from src.components.llm import set_openai_api_key
 store = {}
 
 
-def load_messages_from_db(conversation_id: str, message_manager: MessageManager, s3_manager: S3Manager):
+def load_messages_from_db(conversation_id: str, message_manager: MessageManager, s3_manager: S3Manager, table_name: str = None):
     """DB에서 메시지를 로드하여 session_state에 저장"""
     if not conversation_id or not message_manager:
         return False
     
     try:
-        # DB에서 메시지 로드
-        db_messages = message_manager.load_messages(conversation_id)
+        # DB에서 메시지 로드 (테이블명이 지정된 경우 해당 테이블 사용)
+        if table_name:
+            db_messages = message_manager.load_messages(conversation_id, table_name)
+        else:
+            db_messages = message_manager.load_messages(conversation_id)
         
         if not db_messages:
             return False
@@ -97,7 +100,13 @@ def load_messages_from_db(conversation_id: str, message_manager: MessageManager,
                         session_messages.append([role, [[MessageType.TEXT, content]]])
             
             # 세션 상태에 메시지 저장
-            st.session_state["messages_UploadData"] = session_messages
+            if table_name and "dataanalysis" in table_name:
+                st.session_state["messages_UploadData"] = session_messages
+            elif table_name and "preprocessing" in table_name:
+                st.session_state["messages_UploadData_preprocessing"] = session_messages
+            else:
+                st.warning("대화 기록 로드 실패: 테이블 이름이 지정되지 않았습니다.")  # 테이블 이름이 지정되지 않았을 때 경고 메시지 출력
+
             return True
         
     except Exception as e:
@@ -108,7 +117,7 @@ def load_messages_from_db(conversation_id: str, message_manager: MessageManager,
 #--------------------------------#
 #      Sidebar Configuration     #
 #--------------------------------#
-def render_conversation_history(s3_manager: S3Manager, conversation_manager: ConversationManager, message_manager: MessageManager):
+def render_conversation_history_analysis(s3_manager: S3Manager, conversation_manager: ConversationManager, message_manager: MessageManager, table_name: str = None):
     with st.sidebar:
         st.divider()
         st.header("💬 대화 기록")
@@ -117,25 +126,21 @@ def render_conversation_history(s3_manager: S3Manager, conversation_manager: Con
         if st.button("➕ 새 대화 시작", use_container_width=True):
             st.session_state.session_uuid = str(uuid.uuid4())
             st.session_state.conversation_id = None
-            
-            # 대화 관련 세션 상태 초기화
+                            
+            # 데이터 분석 에이전트용 변수 초기화
             st.session_state["messages_UploadData"] = []
             st.session_state["last_result_df"] = None
             st.session_state["last_figure"] = None
-            
-            # 업로드된 파일 및 데이터프레임 관련 세션 상태 초기화
             st.session_state["uploaded_data"] = None
             st.session_state["df_UploadData"] = None
+            st.session_state["messages_sidebar_UploadData"] = []
             
-            # 에이전트 및 Python 도구 관련 세션 상태 초기화
             if "agent_with_UploadData" in st.session_state:
                 del st.session_state["agent_with_UploadData"]
             if "python_tool" in st.session_state:
                 del st.session_state["python_tool"]
-            
-            # 데이터 적용 상태 초기화
-            if "data_applied" in st.session_state:
-                del st.session_state["data_applied"]
+            if "thinking_placeholder" in st.session_state:
+                del st.session_state["thinking_placeholder"]
             
             st.success("🆕 새로운 대화를 시작합니다!")
             time.sleep(1)
@@ -157,8 +162,8 @@ def render_conversation_history(s3_manager: S3Manager, conversation_manager: Con
                             st.session_state.session_uuid = convo['session_uuid']
                             st.session_state.conversation_id = convo['session_uuid']
                             
-                            # 이전 대화 메시지 로드
-                            if load_messages_from_db(convo['session_uuid'], message_manager, s3_manager):
+                            # 이전 대화 메시지 로드 (테이블명 전달)
+                            if load_messages_from_db(convo['session_uuid'], message_manager, s3_manager, table_name):
                                 st.success(f"✅ '{convo['topic']}' 대화를 불러왔습니다!")
                                 
                                 # 에이전트 상태 복원 (데이터프레임이 있는 경우)
@@ -190,6 +195,87 @@ def render_conversation_history(s3_manager: S3Manager, conversation_manager: Con
                 st.error(f"대화 목록 로드 실패: {e}")
 
 
+def render_conversation_history_preprocessing(s3_manager: S3Manager, conversation_manager: ConversationManager, message_manager: MessageManager, table_name: str = None):
+    with st.sidebar:
+        st.divider()
+        st.header("💬 대화 기록")
+
+        # 새 대화 시작 버튼
+        if st.button("➕ 새 대화 시작", use_container_width=True):
+            st.session_state.session_uuid = str(uuid.uuid4())
+            st.session_state.conversation_id = None
+            
+            # 전처리 에이전트 전용 변수 초기화
+            st.session_state["messages_UploadData_preprocessing"] = []
+            st.session_state["last_result_df_preprocessing"] = None
+            st.session_state["uploaded_data_preprocessing"] = None
+            st.session_state["df_UploadData_preprocessing"] = None
+            st.session_state["file_processed_preprocessing"] = False
+            st.session_state["uploaded_file_signature_preprocessing"] = None
+            st.session_state["messages_sidebar_UploadData_preprocessing"] = []
+            
+            # 전처리 에이전트 관련 상태 삭제
+            if "agent_with_UploadData_preprocessing" in st.session_state:
+                del st.session_state["agent_with_UploadData_preprocessing"]
+            if "python_tool_preprocessing" in st.session_state:
+                del st.session_state["python_tool_preprocessing"]
+            if "thinking_placeholder_preprocessing" in st.session_state:
+                del st.session_state["thinking_placeholder_preprocessing"]
+            
+            st.success("🆕 새로운 대화를 시작합니다!")
+            time.sleep(1)
+            st.rerun()
+
+        # 대화 목록 표시 (사용자 ID가 있는 경우)
+        if hasattr(st.session_state, 'username'):
+            try:
+                conversations = conversation_manager.get_user_conversations(st.session_state.username)
+                
+                for convo in conversations:
+                    # 현재 보고 있는 대화 강조
+                    button_type = "primary" if convo['session_uuid'] == st.session_state.conversation_id else "secondary"
+                    
+                    col1, col2 = st.columns([0.8, 0.2])
+                    with col1:
+                        if st.button(f"{convo['topic']} ({timestamp_to_datetime(convo['created_at']).strftime('%y-%m-%d %H:%M')})", 
+                                    key=f"convo_{convo['session_uuid']}", use_container_width=True, type=button_type):
+                            st.session_state.session_uuid = convo['session_uuid']
+                            st.session_state.conversation_id = convo['session_uuid']
+                            
+                            # 이전 대화 메시지 로드 (테이블명 전달)
+                            if load_messages_from_db(convo['session_uuid'], message_manager, s3_manager, table_name):
+                                st.success(f"✅ '{convo['topic']}' 대화를 불러왔습니다!")
+                                
+                                # 전처리 에이전트 상태 복원 (데이터프레임이 있는 경우)
+                                if st.session_state.get("messages_UploadData_preprocessing"):
+                                    for role, content_list in st.session_state["messages_UploadData_preprocessing"]:
+                                        for content in content_list:
+                                            if isinstance(content, list) and len(content) == 2:
+                                                message_type, message_content = content
+                                                if message_type == MessageType.DATAFRAME and isinstance(message_content, pd.DataFrame):
+                                                    # 마지막 데이터프레임을 현재 데이터로 설정
+                                                    st.session_state["df_UploadData_preprocessing"] = message_content
+                                                    st.session_state["uploaded_data_preprocessing"] = message_content
+                                                    
+                                                    # Python 도구가 있으면 데이터프레임 설정
+                                                    if "python_tool_preprocessing" in st.session_state:
+                                                        st.session_state["python_tool_preprocessing"].locals["df_UploadData"] = message_content
+                                                        st.session_state["python_tool_preprocessing"].locals["df"] = message_content
+                                                    break
+                            else:
+                                st.warning(f"⚠️ '{convo['topic']}' 대화 로드에 실패했습니다.")
+                            
+                            time.sleep(1)
+                            st.rerun()
+                    with col2:
+                        if st.button("🗑️", key=f"del_{convo['session_uuid']}"):
+                            conversation_manager.delete_conversation(convo['session_uuid'], s3_manager)
+                            if st.session_state.conversation_id == convo['session_uuid']:
+                                st.session_state.session_uuid = str(uuid.uuid4())
+                                st.session_state.conversation_id = None
+                            st.rerun()
+            except Exception as e:
+                st.error(f"대화 목록 로드 실패: {e}")
 
 #--------------------------------#
 #      LLM 체인 생성 함수          #

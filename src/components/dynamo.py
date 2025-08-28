@@ -49,41 +49,88 @@ class DynamoDBManager:
     
     def create_tables_if_not_exists(self):
         """DynamoDB 테이블이 없으면 생성"""
-        existing_tables = [table.name for table in self.dynamodb.tables.all()]
+        try:
+            existing_tables = [table.name for table in self.dynamodb.tables.all()]
+            print(f"Existing tables: {existing_tables}")
+            
+            # Conversations 테이블 (전처리 또는 데이터 분석용)
+            if self.conversations_table_name not in existing_tables:
+                try:
+                    # 테이블 용도에 따른 태그 추가
+                    table_purpose = "preprocessing" if "preprocessing" in self.conversations_table_name else "dataanalysis"
+                    
+                    print(f"Creating {table_purpose} conversations table: {self.conversations_table_name}")
+                    
+                    self.dynamodb.create_table(
+                        TableName=self.conversations_table_name,
+                        KeySchema=[
+                            {'AttributeName': 'session_uuid', 'KeyType': 'HASH'}
+                        ],
+                        AttributeDefinitions=[
+                            {'AttributeName': 'session_uuid', 'AttributeType': 'S'},
+                            {'AttributeName': 'user_id', 'AttributeType': 'S'},
+                            {'AttributeName': 'created_at', 'AttributeType': 'N'}
+                        ],
+                        GlobalSecondaryIndexes=[
+                            {
+                                'IndexName': 'user_id-created_at-index',
+                                'KeySchema': [
+                                    {'AttributeName': 'user_id', 'KeyType': 'HASH'},
+                                    {'AttributeName': 'created_at', 'KeyType': 'RANGE'}
+                                ],
+                                'Projection': {'ProjectionType': 'ALL'}
+                            }
+                        ],
+                        BillingMode='PAY_PER_REQUEST',
+                        Tags=[
+                            {
+                                'Key': 'Purpose',
+                                'Value': table_purpose
+                            },
+                            {
+                                'Key': 'Environment',
+                                'Value': 'development'
+                            }
+                        ]
+                    )
+                    
+                    # 테이블이 ACTIVE 상태가 될 때까지 대기
+                    waiter = self.dynamodb.meta.client.get_waiter('table_exists')
+                    waiter.wait(TableName=self.conversations_table_name)
+                    
+                    # GSI가 ACTIVE 상태가 될 때까지 대기
+                    waiter = self.dynamodb.meta.client.get_waiter('table_exists')
+                    waiter.wait(
+                        TableName=self.conversations_table_name,
+                        WaiterConfig={'Delay': 5, 'MaxAttempts': 20}
+                    )
+                    
+                    print(f"✅ Created {table_purpose} conversations table: {self.conversations_table_name}")
+                    print(f"  - Purpose: {table_purpose}")
+                    print(f"  - Table Name: {self.conversations_table_name}")
+                    print(f"  - Region: {self.dynamodb.meta.client.meta.region_name}")
+                    
+                except ClientError as e:
+                    if e.response['Error']['Code'] != 'ResourceInUseException':
+                        print(f"❌ Error creating conversations table: {e}")
+                        raise
+                    else:
+                        print(f"ℹ️ Conversations table already exists: {self.conversations_table_name}")
+            else:
+                print(f"ℹ️ Conversations table already exists: {self.conversations_table_name}")
+                
+        except Exception as e:
+            print(f"❌ Error in create_tables_if_not_exists: {e}")
+            raise
         
-        # Conversations 테이블
-        if self.conversations_table_name not in existing_tables:
-            try:
-                self.dynamodb.create_table(
-                    TableName=self.conversations_table_name,
-                    KeySchema=[
-                        {'AttributeName': 'session_uuid', 'KeyType': 'HASH'}
-                    ],
-                    AttributeDefinitions=[
-                        {'AttributeName': 'session_uuid', 'AttributeType': 'S'},
-                        {'AttributeName': 'user_id', 'AttributeType': 'S'},
-                        {'AttributeName': 'created_at', 'AttributeType': 'N'}
-                    ],
-                    GlobalSecondaryIndexes=[
-                        {
-                            'IndexName': 'user_id-created_at-index',
-                            'KeySchema': [
-                                {'AttributeName': 'user_id', 'KeyType': 'HASH'},
-                                {'AttributeName': 'created_at', 'KeyType': 'RANGE'}
-                            ],
-                            'Projection': {'ProjectionType': 'ALL'}
-                        }
-                    ],
-                    BillingMode='PAY_PER_REQUEST'
-                )
-                print(f"Created table {self.conversations_table_name}")
-            except ClientError as e:
-                if e.response['Error']['Code'] != 'ResourceInUseException':
-                    raise
-        
-        # Messages 테이블
+        # Messages 테이블 (전처리 또는 데이터 분석용)
         if self.messages_table_name not in existing_tables:
             try:
+                # 테이블 용도에 따른 태그 추가
+                table_purpose = "preprocessing" if "preprocessing" in self.messages_table_name else "dataanalysis"
+                
+                print(f"Creating {table_purpose} messages table: {self.messages_table_name}")
+                
                 self.dynamodb.create_table(
                     TableName=self.messages_table_name,
                     KeySchema=[
@@ -94,12 +141,36 @@ class DynamoDBManager:
                         {'AttributeName': 'conversation_id', 'AttributeType': 'S'},
                         {'AttributeName': 'timestamp', 'AttributeType': 'N'}
                     ],
-                    BillingMode='PAY_PER_REQUEST'
+                    BillingMode='PAY_PER_REQUEST',
+                    Tags=[
+                        {
+                            'Key': 'Purpose',
+                            'Value': table_purpose
+                        },
+                        {
+                            'Key': 'Environment',
+                            'Value': 'development'
+                        }
+                    ]
                 )
-                print(f"Created table {self.messages_table_name}")
+                
+                # 테이블이 ACTIVE 상태가 될 때까지 대기
+                waiter = self.dynamodb.meta.client.get_waiter('table_exists')
+                waiter.wait(TableName=self.messages_table_name)
+                
+                print(f"✅ Created {table_purpose} messages table: {self.messages_table_name}")
+                print(f"  - Purpose: {table_purpose}")
+                print(f"  - Table Name: {self.messages_table_name}")
+                print(f"  - Region: {self.dynamodb.meta.client.meta.region_name}")
+                
             except ClientError as e:
                 if e.response['Error']['Code'] != 'ResourceInUseException':
+                    print(f"❌ Error creating messages table: {e}")
                     raise
+                else:
+                    print(f"ℹ️ Messages table already exists: {self.messages_table_name}")
+        else:
+            print(f"ℹ️ Messages table already exists: {self.messages_table_name}")
 
 class S3Manager:
     """S3 관리 클래스"""
@@ -280,15 +351,17 @@ class S3Manager:
 class ConversationManager:
     """대화 관리 클래스"""
     
-    def __init__(self, dynamo_manager: DynamoDBManager):
+    def __init__(self, dynamo_manager: DynamoDBManager, conversations_table_name: str = None):
         """
         대화 매니저 초기화
         
         Args:
             dynamo_manager: DynamoDB 매니저 인스턴스
+            conversations_table_name: 사용할 대화 테이블명 (None이면 기본 테이블 사용)
         """
         self.dynamo_manager = dynamo_manager
-        self.conversations_table = dynamo_manager.conversations_table
+        self.conversations_table_name = conversations_table_name or dynamo_manager.conversations_table_name
+        self.conversations_table = dynamo_manager.dynamodb.Table(self.conversations_table_name)
         self.messages_table = dynamo_manager.messages_table
     
     def get_or_create_conversation(self, session_uuid: str, user_id: Optional[str] = None) -> Optional[Dict]:
@@ -334,13 +407,44 @@ class ConversationManager:
             list: 대화 목록
         """
         try:
+            print(f"🔍 Querying conversations for user: {user_id}")
+            print(f"📊 Using table: {self.conversations_table_name}")
+            
+            # 테이블 상태 확인
+            try:
+                table_status = self.conversations_table.meta.client.describe_table(
+                    TableName=self.conversations_table_name
+                )
+                print(f"📋 Table status: {table_status['Table']['TableStatus']}")
+                
+                # GSI 상태 확인
+                if 'GlobalSecondaryIndexes' in table_status['Table']:
+                    for gsi in table_status['Table']['GlobalSecondaryIndexes']:
+                        print(f"🔗 GSI {gsi['IndexName']}: {gsi['IndexStatus']}")
+                
+            except Exception as status_error:
+                print(f"⚠️ Could not check table status: {status_error}")
+            
             response = self.conversations_table.query(
                 IndexName='user_id-created_at-index',
                 KeyConditionExpression=Key('user_id').eq(user_id),
                 ScanIndexForward=False  # 최신순 정렬
             )
-            return response.get('Items', [])
+            
+            conversations = response.get('Items', [])
+            print(f"✅ Found {len(conversations)} conversations for user {user_id}")
+            return conversations
+            
         except Exception as e:
+            print(f"❌ Error querying conversations: {e}")
+            print(f"🔍 Table: {self.conversations_table_name}")
+            print(f"👤 User ID: {user_id}")
+            
+            # 테이블이 존재하지 않는 경우 빈 리스트 반환
+            if "ResourceNotFoundException" in str(e):
+                print(f"⚠️ Table {self.conversations_table_name} does not exist")
+                return []
+            
             st.error(f"대화 목록 조회 오류: {e}")
             return []
     
@@ -422,18 +526,26 @@ class MessageManager:
         self.conversations_table = dynamo_manager.conversations_table
         self.messages_table = dynamo_manager.messages_table
     
-    def load_messages(self, conversation_id: str) -> List[Dict]:
+    def load_messages(self, conversation_id: str, table_name: str = None) -> List[Dict]:
         """
         대화 메시지 로드
         
         Args:
             conversation_id: 대화 ID
+            table_name: 사용할 메시지 테이블명 (None이면 기본 테이블 사용)
         
         Returns:
             list: 메시지 목록
         """
         try:
-            response = self.messages_table.query(
+            # 테이블명이 지정된 경우 해당 테이블 사용, 아니면 기본 테이블 사용
+            if table_name:
+                # DynamoDB 리소스에서 직접 테이블 참조
+                table = self.dynamo_manager.dynamodb.Table(table_name)
+            else:
+                table = self.messages_table
+            
+            response = table.query(
                 KeyConditionExpression=Key('conversation_id').eq(conversation_id),
                 ScanIndexForward=True  # 시간순 정렬
             )
@@ -526,15 +638,16 @@ class MessageManager:
 class AgencyConversationManager:
     """Agency 대화 관리 클래스 - output, intent, assessment 저장용"""
     
-    def __init__(self, dynamo_manager: DynamoDBManager):
+    def __init__(self, dynamo_manager: DynamoDBManager, agency_table_name: str = None):
         """
         Agency 대화 매니저 초기화
         
         Args:
             dynamo_manager: DynamoDB 매니저 인스턴스
+            agency_table_name: Agency 메시지 테이블명 (None이면 기본값 사용)
         """
         self.dynamo_manager = dynamo_manager
-        self.agency_table_name = "agency_conversations"
+        self.agency_table_name = agency_table_name or "agency_messages"
         
         # Agency 테이블 참조
         self.agency_table = self.dynamo_manager.dynamodb.Table(self.agency_table_name)
@@ -548,6 +661,14 @@ class AgencyConversationManager:
         
         if self.agency_table_name not in existing_tables:
             try:
+                # 테이블 용도에 따른 태그 추가
+                if "preprocessing" in self.agency_table_name:
+                    table_purpose = "preprocessing"
+                elif "dataanalysis" in self.agency_table_name:
+                    table_purpose = "dataanalysis"
+                else:
+                    table_purpose = "general"
+                
                 self.dynamo_manager.dynamodb.create_table(
                     TableName=self.agency_table_name,
                     KeySchema=[
@@ -558,9 +679,22 @@ class AgencyConversationManager:
                         {'AttributeName': 'conversation_id', 'AttributeType': 'S'},
                         {'AttributeName': 'timestamp', 'AttributeType': 'N'}
                     ],
-                    BillingMode='PAY_PER_REQUEST'
+                    BillingMode='PAY_PER_REQUEST',
+                    Tags=[
+                        {
+                            'Key': 'Purpose',
+                            'Value': table_purpose
+                        },
+                        {
+                            'Key': 'Environment',
+                            'Value': 'development'
+                        }
+                    ]
                 )
-                print(f"Created table {self.agency_table_name}")
+                print(f"Created {table_purpose} agency table: {self.agency_table_name}")
+                print(f"  - Purpose: {table_purpose}")
+                print(f"  - Table Name: {self.agency_table_name}")
+                print(f"  - Region: {self.dynamo_manager.dynamodb.meta.client.meta.region_name}")
             except ClientError as e:
                 if e.response['Error']['Code'] != 'ResourceInUseException':
                     raise
