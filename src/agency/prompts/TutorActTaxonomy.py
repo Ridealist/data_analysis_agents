@@ -13,8 +13,8 @@ class TutorAct(Enum):
     명명 규칙: {카테고리약어}_{핵심행동} = {카테고리번호}{일련번호}
     - SE: Self-Efficacy (자기효능감)
     - MP: Metacognition-Planning (메타인지-계획)
-    - ML: Metacognition-Execution-Literacy (메타인지-수행-리터러시)
-    - MR: Metacognition-Execution-Responsibility (메타인지-수행-책임의식)
+    - MEL: Metacognition-Execution-Literacy (메타인지-수행-리터러시)
+    - MER: Metacognition-Execution-Responsibility (메타인지-수행-책임의식)
     - MS: Metacognition-SelfReflection (메타인지-성찰)
     - IM: Intrinsic Motivation (내재적 동기)
     """
