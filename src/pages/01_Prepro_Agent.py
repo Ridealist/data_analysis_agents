@@ -316,37 +316,42 @@ def update_ui_from_queues(main_queue: Queue, sidebar_queue: Queue, error_queue: 
                 else:
                     msg_type, content = item
                     
-                    with main_container:
-                        if msg_type == "USER_MESSAGE":
-                            # 사용자 메시지는 이미 표시됨
-                            pass
+                    try:
+                        with main_container:
+                            if msg_type == "USER_MESSAGE":
+                                # 사용자 메시지는 이미 표시됨
+                                pass
+                                
+                            elif msg_type == "DATAFRAME":
+                                st.dataframe(content, use_container_width=True)
+                                add_message_main(MessageRole.ASSISTANT, [MessageType.DATAFRAME, content])
                             
-                        elif msg_type == "DATAFRAME":
-                            st.dataframe(content, use_container_width=True)
-                            add_message_main(MessageRole.ASSISTANT, [MessageType.DATAFRAME, content])
-                        
-                        elif msg_type == "CODE":
-                            with st.status("🔍 실행 가능한 전처리 코드 보기", expanded=False):
-                                st.code(content, language="python")
-                            add_message_main(MessageRole.ASSISTANT, [MessageType.CODE, content])
-                        
-                        elif msg_type == "TEXT_CHUNK":
-                            main_text_buffer += content
-                            if main_text_placeholder is None:
-                                main_text_placeholder = st.empty()
-                            main_text_placeholder.markdown(main_text_buffer)
-                        
-                        elif msg_type == "FINAL_TEXT":
-                            if main_text_placeholder is None:
-                                main_text_placeholder = st.empty()
-                            main_text_placeholder.markdown(content)
-                            main_text_buffer = content
-                        
-                        elif msg_type == "DATAFRAME_FINAL":
-                            st.dataframe(content, use_container_width=True)
-                            add_message_main(MessageRole.ASSISTANT, [MessageType.DATAFRAME, content])
-                            # 세션 상태에 저장
-                            st.session_state['last_result_df_preprocessing'] = content
+                            elif msg_type == "CODE":
+                                with st.status("🔍 실행 가능한 전처리 코드 보기", expanded=False):
+                                    st.code(content, language="python")
+                                add_message_main(MessageRole.ASSISTANT, [MessageType.CODE, content])
+                            
+                            elif msg_type == "TEXT_CHUNK":
+                                main_text_buffer += content
+                                if main_text_placeholder is None:
+                                    main_text_placeholder = st.empty()
+                                main_text_placeholder.markdown(main_text_buffer)
+                            
+                            elif msg_type == "FINAL_TEXT":
+                                if main_text_placeholder is None:
+                                    main_text_placeholder = st.empty()
+                                main_text_placeholder.markdown(content)
+                                main_text_buffer = content
+                            
+                            elif msg_type == "DATAFRAME_FINAL":
+                                st.dataframe(content, use_container_width=True)
+                                add_message_main(MessageRole.ASSISTANT, [MessageType.DATAFRAME, content])
+                                # 세션 상태에 저장
+                                st.session_state['last_result_df_preprocessing'] = content
+                    
+                    except Exception as msg_error:
+                        # 개별 메시지 처리 실패해도 다음 메시지는 처리
+                        print(f"[update_ui_from_queues:message] {msg_type} 처리 실패: {msg_error}")
                             
             except Empty:
                 pass
@@ -493,44 +498,48 @@ def add_message_main(role: MessageRole, content: List[Union[MessageType, str]]):
     
     # S3 업로드 및 DB 저장 처리
     if st.session_state.conversation_id:
-        if message_type == MessageType.DATAFRAME and isinstance(message_content, (pd.DataFrame, pd.Series)):
-            # DataFrame을 S3에 업로드
-            s3_path = s3_manager.upload_to_s3(
-                message_content, 
-                'dataframe', 
-                st.session_state.get("conversation_id")
-            )
-            if s3_path:
-                db_content_type = 'dataframe_s3'
-                db_content = s3_path
-                # DB에만 S3 경로 저장, 세션에는 원본 객체 유지
-        
-        elif message_type == MessageType.TEXT:
-            db_content_type = 'text'
-            db_content = message_content
-        
-        elif message_type == MessageType.CODE:
-            db_content_type = 'code'
-            db_content = message_content
-        
-        elif message_type == MessageType.ERROR:
-            db_content_type = 'error'
-            db_content = message_content
-        
-        # DB에 저장
-        if db_content_type and db_content:
-            # AI 답변인 경우 모델 정보도 함께 저장
-            llm_model = None
-            if role == MessageRole.ASSISTANT:
-                llm_model = st.session_state.get("model_option_general", "gpt-4.1-mini")
+        try:
+            if message_type == MessageType.DATAFRAME and isinstance(message_content, (pd.DataFrame, pd.Series)):
+                # DataFrame을 S3에 업로드
+                s3_path = s3_manager.upload_to_s3(
+                    message_content, 
+                    'dataframe', 
+                    st.session_state.get("conversation_id")
+                )
+                if s3_path:
+                    db_content_type = 'dataframe_s3'
+                    db_content = s3_path
+                    # DB에만 S3 경로 저장, 세션에는 원본 객체 유지
             
-            message_manager.save_message(
-                st.session_state.get("conversation_id"),
-                role,
-                db_content_type,
-                db_content,
-                llm_model
-            )
+            elif message_type == MessageType.TEXT:
+                db_content_type = 'text'
+                db_content = message_content
+            
+            elif message_type == MessageType.CODE:
+                db_content_type = 'code'
+                db_content = message_content
+            
+            elif message_type == MessageType.ERROR:
+                db_content_type = 'error'
+                db_content = message_content
+            
+            # DB에 저장
+            if db_content_type and db_content:
+                # AI 답변인 경우 모델 정보도 함께 저장
+                llm_model = None
+                if role == MessageRole.ASSISTANT:
+                    llm_model = st.session_state.get("model_option_general", "gpt-4.1-mini")
+                
+                message_manager.save_message(
+                    st.session_state.get("conversation_id"),
+                    role,
+                    db_content_type,
+                    db_content,
+                    llm_model
+                )
+        except Exception as e:
+            # DB/S3 저장 실패해도 로컬 세션에는 저장
+            print(f"[add_message_main] DB/S3 저장 실패: {e}")
     
     # 세션 상태에는 원본 객체 그대로 저장 (S3 경로가 아닌)
     messages = st.session_state["messages_UploadData_preprocessing"]
@@ -788,8 +797,8 @@ if st.session_state["logged_in"]:
     with st.expander("📁 데이터 업로드", expanded=True):
         uploaded_file = st.file_uploader(
             "데이터 파일을 업로드해주세요", 
-            type=["csv", "xlsx", "xls"], 
-            help="분석할 데이터를 CSV, Excel 형식으로 업로드해주세요."
+            type=["csv", "xlsx", "xls", "tsv", "txt"], 
+            help="분석할 데이터를 업로드해주세요. (지원 형식: CSV, Excel, TSV/TXT)"
         )
 
         if uploaded_file is not None:
@@ -810,8 +819,13 @@ if st.session_state["logged_in"]:
                 # 파일 형식에 따른 로딩
                 if file_extension in ['xlsx', 'xls']:
                     # Excel 파일 로딩 - 더 안정적인 처리
+                    dataframe = None  # 초기화
                     try:
-                        dataframe = pd.read_excel(uploaded_file, engine='openpyxl')
+                        # .xls와 .xlsx를 구분하여 적절한 엔진 사용
+                        if file_extension == 'xls':
+                            dataframe = pd.read_excel(uploaded_file, engine='xlrd')
+                        else:  # xlsx
+                            dataframe = pd.read_excel(uploaded_file, engine='openpyxl')
                         file_type = "Excel"
                         st.success(f"✅ Excel 파일을 성공적으로 읽었습니다.")
                     except Exception as excel_error:
@@ -822,9 +836,10 @@ if st.session_state["logged_in"]:
                         st.session_state["agent_with_UploadData_preprocessing"] = None
                         
                 else:
-                    # CSV 파일 로딩 - 다양한 인코딩 시도
+                    # CSV/TSV/TXT 파일 로딩 - 다양한 인코딩 시도
                     dataframe = None
-                    file_type = "CSV"
+                    file_type = "TSV/TXT" if file_extension in ['tsv', 'txt'] else "CSV"
+                    sep = '\t' if file_extension in ['tsv', 'txt'] else ','
                     
                     # 일반적인 인코딩 방식들을 순차적으로 시도
                     encodings = ['utf-8', 'cp949', 'euc-kr', 'latin1', 'iso-8859-1']
@@ -833,7 +848,7 @@ if st.session_state["logged_in"]:
                         try:
                             # 파일 포인터를 처음으로 되돌리기
                             uploaded_file.seek(0)
-                            dataframe = pd.read_csv(uploaded_file, encoding=encoding)
+                            dataframe = pd.read_csv(uploaded_file, encoding=encoding, sep=sep)
                             st.success(f"✅ {encoding} 인코딩으로 파일을 성공적으로 읽었습니다.")
                             break
                         except UnicodeDecodeError:
@@ -1118,66 +1133,73 @@ if st.session_state["logged_in"]:
         user_input = st.chat_input("데이터에 질문해보세요!")  # 사용자 입력 받기
 
         if user_input:
-            # 사용자 메시지 표시
-            st.chat_message("user").write(user_input)
-            add_message_main(MessageRole.USER, [MessageType.TEXT, user_input])
+            try:
+                # 사용자 메시지 표시
+                st.chat_message("user").write(user_input)
+                add_message_main(MessageRole.USER, [MessageType.TEXT, user_input])
 
-            # Agency 테이블에 사용자 입력 저장
-            save_user_input_to_agency(user_input)
+                # Agency 테이블에 사용자 입력 저장
+                save_user_input_to_agency(user_input)
 
-            # 사이드바 대화 기록에서 'user'의 메시지 추가
-            st.session_state["messages_sidebar_UploadData_preprocessing"].append({
-                "role": "user",
-                "content": user_input
-            })
-            
-            # Thinking chain 생성
-            thinking_chain = create_thinking_chain(st.session_state.get("openai_api_key"))
-            
-            # 세션 상태 프록시 생성
-            session_state_proxy = {
-                "model_option_general": st.session_state.get("model_option_general"),
-            }
-
-            with st.spinner("AI가 생각하고 있습니다..."):
-
-                # 사이드바 완전 초기화 - 이전 표시 내용 모두 제거
-                thinking_container.empty()
-
-                # 새로운 고정 placeholder 생성
-                with thinking_container:
-                    st.session_state["thinking_placeholder_preprocessing"] = st.empty()
-
-                # 병렬 실행
-                main_queue, sidebar_queue, error_queue = parallel_execution_manager(
-                    user_input,
-                    st.session_state["agent_with_UploadData_preprocessing"],
-                    st.session_state["python_tool_preprocessing"],
-                    thinking_chain,
-                    add_message_main,
-                    session_state_proxy
-                )
-            
-                # 응답 컨테이너 생성
-                with st.chat_message("assistant"):
-                    main_container = st.container()
+                # 사이드바 대화 기록에서 'user'의 메시지 추가
+                st.session_state["messages_sidebar_UploadData_preprocessing"].append({
+                    "role": "user",
+                    "content": user_input
+                })
                 
-                # 사이드바 컨테이너 초기화 (이전 내용 지우기)
-                thinking_container.empty()
-                with thinking_container:
-                    sidebar_container = st.container()
+                # Thinking chain 생성
+                thinking_chain = create_thinking_chain(st.session_state.get("openai_api_key"))
                 
-                # UI 업데이트 (메인 스레드에서 실행)
-                update_ui_from_queues(
-                    main_queue,
-                    sidebar_queue,
-                    error_queue,
-                    main_container,
-                    sidebar_container,
-                    add_message_main
-                )
+                # 세션 상태 프록시 생성
+                session_state_proxy = {
+                    "model_option_general": st.session_state.get("model_option_general"),
+                }
 
-            st.success("✅ 전처리 완료!")
+                with st.spinner("AI가 생각하고 있습니다..."):
+
+                    # 사이드바 완전 초기화 - 이전 표시 내용 모두 제거
+                    thinking_container.empty()
+
+                    # 새로운 고정 placeholder 생성
+                    with thinking_container:
+                        st.session_state["thinking_placeholder_preprocessing"] = st.empty()
+
+                    # 병렬 실행
+                    main_queue, sidebar_queue, error_queue = parallel_execution_manager(
+                        user_input,
+                        st.session_state["agent_with_UploadData_preprocessing"],
+                        st.session_state["python_tool_preprocessing"],
+                        thinking_chain,
+                        add_message_main,
+                        session_state_proxy
+                    )
+                
+                    # 응답 컨테이너 생성
+                    with st.chat_message("assistant"):
+                        main_container = st.container()
+                    
+                    # 사이드바 컨테이너 초기화 (이전 내용 지우기)
+                    thinking_container.empty()
+                    with thinking_container:
+                        sidebar_container = st.container()
+                    
+                    # UI 업데이트 (메인 스레드에서 실행)
+                    update_ui_from_queues(
+                        main_queue,
+                        sidebar_queue,
+                        error_queue,
+                        main_container,
+                        sidebar_container,
+                        add_message_main
+                    )
+
+                st.success("✅ 전처리 완료!")
+            
+            except Exception as e:
+                # 최상위 예외 처리 - Streamlit 앱 크래시 방지
+                st.error(f"❌ 전처리 중 오류가 발생했습니다: {str(e)}")
+                print(f"[main_execution_error] {e}")
+                # 에러 발생해도 사용자는 계속 질문 가능
 
 else:
     st.error("먼저 로그인을 해주세요!")

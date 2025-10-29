@@ -3,6 +3,7 @@ pandas
 matplotlib
 seaborn
 openpyxl
+xlrd>=2.0.1
 
 PyPDF2
 pypandoc[pandoc]
