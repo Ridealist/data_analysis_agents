@@ -69,7 +69,7 @@ DataAgent_streamlit_app/
 │ # - Configuration options
 ├── pages/
 │ ├── 00_Main.py # Main data analysis page
-│ ├── 01_CSV_Agent.py # CSV data analysis
+│ ├── 01_Analy_Agent.py # CSV data analysis
 │ ├── 01_Prepro_Agent.py # Data preprocessing
 │ └── 02_Code_Execution_Agent.py # Code execution agent page
 └── utils/

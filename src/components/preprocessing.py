@@ -208,12 +208,45 @@ Context preview (df.head):
 Column guideline (optional):
 {guide}
 
-When you respond (via the python tool), write COMPLETE, EXECUTABLE code that:
-1) reads/modifies the already-loaded `df` (no I/O), 
-2) produces a cleaned tidy DataFrame in a variable named `cleaned_df` (NOT result_df),
-3) prints a concise audit log (row/col counts before→after, null summary, dtype changes, duplicates removed, normalization details),
-4) avoids any plotting libraries or file I/O.
-5) IMPORTANT: Use 'cleaned_df' as the final variable name, not 'result_df' to avoid confusion with other agents.
+When you respond (via the python tool), write COMPLETE, STANDALONE, COPY-PASTE READY code following this EXACT template:
+
+```python
+# ==========================================
+# 데이터 전처리 코드 - Jupyter/Colab에서 바로 실행 가능
+# ==========================================
+
+# 1. 필수 라이브러리
+import pandas as pd
+import numpy as np
+
+# 2. 데이터 로드 (사용자가 파일 경로만 수정하면 됨)
+# CSV 파일인 경우:
+df = pd.read_csv('파일경로를_입력하세요.csv', encoding='utf-8')
+# Excel 파일인 경우:
+# df = pd.read_excel('파일경로를_입력하세요.xlsx')
+
+print("=== 원본 데이터 ===")
+print(f"Shape: {{{{df.shape}}}}")
+print(df.head())
+
+# 3. 전처리 작업 (여기부터 실제 전처리 코드 작성)
+# [구체적인 전처리 로직을 여기에 작성]
+
+# 4. 결과 확인
+print("\\n=== 전처리 결과 ===")
+print(f"Shape: {{{{cleaned_df.shape}}}}")
+print(f"결측값: {{{{cleaned_df.isnull().sum().sum()}}}}개")
+print(cleaned_df.head())
+```
+
+CRITICAL RULES:
+1) Always include the complete template above with import statements
+2) Fill in the preprocessing logic in section 3 with actual code
+3) Final DataFrame must be named `cleaned_df` (NOT result_df)
+4) Include clear Korean comments explaining each preprocessing step
+5) Code must be 100% runnable when copy-pasted (only file path needs user modification)
+6) Print before/after audit log (row/col counts, null summary, dtype changes)
+7) Avoid any plotting libraries or file I/O operations
 
 CRITICAL RESPONSE RULES:
 - NEVER say "제가 대신 실행해드릴게요" or similar execution offers
