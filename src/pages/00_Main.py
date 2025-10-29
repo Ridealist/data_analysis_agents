@@ -38,4 +38,4 @@ if st.button("Log in", type="primary"):
             
             st.success(f"로그인 성공! 환영합니다, {username}님!")
             time.sleep(0.5)
-            st.switch_page("src/pages/01_Prepro_Agent.py")
+            st.switch_page("src/pages/02_CSV_Agent.py")

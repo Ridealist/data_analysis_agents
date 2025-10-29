@@ -29,7 +29,8 @@ from src.prompts.agent_prompts import AGENT_PREFIX_PROMPT, AGENT_POSTFIX_PROMPT
 from src.utils.dataframe_handler import safe_dataframe_display
 
 # Agency Tutor 관련 import
-from src.agency.Tutor import AgencyTutor
+# from src.agency.Tutor import AgencyTutor
+from src.agency_langgraph.tutor import AgencyTutorLG
 
 # 경고 메시지 숨기기
 warnings.filterwarnings('ignore')
@@ -426,7 +427,7 @@ def create_thinking_chain(api_key):
     client = OpenAI(api_key=api_key)
     model = "gpt-4.1"
 
-    st.session_state['Tutor'] = AgencyTutor(client, model=model)
+    st.session_state['Tutor'] = AgencyTutorLG(client, model=model)
     
     return st.session_state['Tutor']
 
