@@ -14,10 +14,20 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage, System
 def render_thread_manager(agent: LearningAgentRunner):
     """스레드 관리 UI (사이드바용)"""
     
+    st.divider()
+
     st.header("📚 학습 세션 관리")
     
-    thread_list = st.session_state.learning_thread_list
-    current_thread_id = st.session_state.learning_thread_id
+    # 세션 상태 안전하게 가져오기
+    thread_list = st.session_state.get("learning_thread_list", [])
+    current_thread_id = st.session_state.get("learning_thread_id", None)
+    
+    if not thread_list or not current_thread_id:
+        st.info("새 학습 세션을 시작하세요")
+        if st.button("➕ 새 학습 세션 시작", type="primary", use_container_width=True):
+            agent.create_new_thread()
+            st.rerun()
+        return
     
     if thread_list:
         # 현재 세션 표시
@@ -108,40 +118,28 @@ def render_execution_sidebar_chat(agent: LearningAgentRunner, state):
         else:
             # 메시지가 없을 때 안내
             st.info("💬 사이드바에서 튜터와 대화하며 분석을 진행하세요!")
-    
-    st.divider()
-    
-    # 완료 상태 확인 및 입력 영역
+
+        # 메인 화면 입력에 대한 실시간 조언 표시용 placeholder (대화 영역 안에 위치)
+        if not execution_completed:
+            if (
+                "learning_stream_placeholder" not in st.session_state
+                or st.session_state["learning_stream_placeholder"] is None
+            ):
+                st.session_state["learning_stream_placeholder"] = st.empty()
+        
+    # 완료 상태 확인 및 안내 / 버튼
     if execution_completed:
         st.success("✅ 실행 단계가 완료되었습니다!")
         st.info("👈️ 좌측 사이드바에서 'Stage 3: 반성'으로 이동하세요")
     else:
-        # 입력 영역
-        user_input = st.text_area(
-            "메시지 입력:",
-            key="execution_sidebar_input",  # 고유 키로 충돌 방지
-            placeholder="분석 중 궁금한 점을 질문하세요...",
-            height=80
-        )
+        # 안내 및 완료 버튼
+        st.info("💡 메인 화면에서 질문하면, 위 대화 영역에 튜터의 조언이 자동으로 표시됩니다.")
         
-        col1, col2 = st.columns([1, 1])
-        
-        with col1:
-            send_btn = st.button("📤 전송", key="execution_sidebar_send", use_container_width=True)
-        
-        with col2:
-            complete_btn = st.button("✅ 완료", key="execution_sidebar_complete", use_container_width=True)
-        
-        if send_btn and user_input.strip():
-            with st.spinner("응답 생성 중..."):
-                agent.send_message(user_input)
-            st.rerun()
-        elif complete_btn:
+        complete_btn = st.button("✅ 실행 단계 완료", key="execution_sidebar_complete", use_container_width=True)
+        if complete_btn:
             with st.spinner("다음 단계로 이동 중..."):
                 agent.send_message("분석 완료")
             st.rerun()
-        elif send_btn:
-            st.warning("메시지를 입력해주세요")
 
 
 def render_learning_sidebar(agent: LearningAgentRunner, current_page: str = None):
