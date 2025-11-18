@@ -110,7 +110,7 @@ class LLMIntentSelector():
 
     def __init__(self,client,intent_history=[]) -> None:
         self.client = client
-        self.previous_intent = intent_history[-1] if intent_history != [] else [TutorAct.MP_GOAL]
+        self.previous_intent = intent_history[-1] if intent_history != [] else [TutorAct.MEL_EXPLORE]
 
     def get_intent(self,assessment,open=True):
         print("selecting intent... ")

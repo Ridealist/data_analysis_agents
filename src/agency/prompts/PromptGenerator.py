@@ -53,12 +53,8 @@ class RigidPromptGenerator():
 - 학습자가 **주체적으로 문제를 해결**하면서 AI와 균형 잡힌 협력 관계를 구축하도록 지원하기 💡
 """
         
-        # Execution 단계 컨텍스트 추가
-        if phase_context == "execution":
-            system_msg += "\n\n**현재 단계**: 사용자가 학습 계획을 실행하는 단계입니다.\n질문에 답하고, 도움을 제공하세요.\n사용자가 '완료'라고 입력하면 반성 단계로 넘어갑니다."
         # modify above to integrate intent.
         messages = utils.generate_messages(conversation_history, student_prompt, system_msg)
-        
     
         # add part about the tutor's intent based on new TutorAct taxonomy
         intent_prompt = "**중요 사항**: 다음의 예시가 <모범 피드백>입니다. 다음의 피드백을 중심으로 대화 맥락에 맞게 학습자에게 최종적으로 제공할 피드백을 작성하세요.\n---\n"

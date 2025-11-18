@@ -24,7 +24,7 @@ def select_tutor_acts(
     
     Returns:
         List[TutorAct]: 선택된 튜터 행동 리스트
-        예: [TutorAct.MP_GOAL, TutorAct.SE_CONFIDENCE]
+        예: [TutorAct.MEL_EXPLORE, TutorAct.MER_OWNERSHIP]
     """
     from src.agency.prompts.TutorActSelector import LLMIntentSelector
     
@@ -33,4 +33,3 @@ def select_tutor_acts(
     tutor_acts = selector.get_intent(assessment, open=open_mode)
     
     return tutor_acts
-

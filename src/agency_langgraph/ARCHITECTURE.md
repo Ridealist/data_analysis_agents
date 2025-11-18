@@ -87,7 +87,7 @@
 # 3. select_node 후
 {
     ...기존 필드...,
-    "tutor_acts": [TutorAct.MP_GOAL, TutorAct.SE_CONFIDENCE]
+    "tutor_acts": [TutorAct.MEL_EXPLORE, TutorAct.SE_CONFIDENCE]
 }
 
 # 4. generate_prompt_node 후
@@ -369,7 +369,7 @@ START
       → assessment: '{"selection": "ace"}'
   → select_node
       → TutorActSelector.get_intent()
-      → tutor_acts: [TutorAct.MP_GOAL, TutorAct.MEL_EXPLORE]
+      → tutor_acts: [TutorAct.MEL_EXPLORE, TutorAct.SE_GROWTH]
   → generate_prompt_node
       → PromptGenerator.get_prompt()
       → messages: [{role: system, ...}, ...]
