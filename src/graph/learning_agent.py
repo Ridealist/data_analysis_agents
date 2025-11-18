@@ -2,7 +2,7 @@ import streamlit as st
 import sqlite3
 import uuid
 import re
-from typing import TypedDict, Dict, Optional, Literal, Annotated
+from typing import TypedDict, Dict, Optional, Literal, Annotated, List
 from pydantic import BaseModel
 
 from langchain_core.messages import SystemMessage, AIMessage, HumanMessage, ToolMessage
@@ -14,6 +14,7 @@ from langchain_openai import ChatOpenAI
 
 from src.components.llm import get_openai_client
 from src.graph.utils import get_phase_messages
+from src.agency.utils.message_converter import convert_langchain_to_history, extract_last_user_message
 
 # ============================================================
 # Model Configuration
@@ -230,6 +231,10 @@ class LearningAgentState(TypedDict):
 
     # 단계 경계 인덱스 (각 단계의 마지막 메시지 인덱스, 포함)
     phase_end_indices: Optional[Dict[str, int]]  # {"planning": 5, "execution": 10, ...}
+    
+    # Execution 단계 히스토리 (AgencyTutorLG용) - Phase 1: 필드만 추가, 아직 사용하지 않음
+    execution_intent_history: Optional[List]  # execution 단계 튜터 행동 이력 (문자열 리스트의 리스트)
+    execution_assessment_history: Optional[List]  # execution 단계 학생 상태 평가 이력 (문자열 리스트)
 # ============================================================
 # Phase-specific System Prompts (System Prompt)
 # ============================================================
@@ -381,8 +386,18 @@ PLANNING_PROMPT = f"""{BASE_SYSTEM_PROMPT}
 
 
 EXECUTION_PROMPT = f"""{BASE_SYSTEM_PROMPT}
-사용자가 학습 계획을 실행하는 단계입니다.
-질문에 답하고, 도움을 제공하세요."""
+
+📍 현재 단계: 학습 계획 실행**
+학습자는 지금 계획한 데이터 분석을 실제로 수행하고 있습니다.
+- 학습자가 ChatGPT와 대화하며 분석을 진행하는 과정을 지켜보고 있어요
+- 프롬프트 작성, AI 결과 해석, 검증 등 실제 실행 행위에 초점을 맞춰 지원하세요
+
+**⚠️ 특별 지침 - 첫 인사 응답**
+이제 막 실행 단계로 진입했습니다. 학습자에게 간단히 시작을 독려하는 첫 인사만 하세요.
+- **최대 2-3문장**으로 매우 짧게 작성하세요
+- "이제 실행 단계입니다" + "시작 방법 간단히 안내" 정도만
+- 예시나 긴 설명은 절대 금지
+- 핵심만 전달하고 바로 사용자 입력을 기다리세요"""
 
 
 REFLECTION_PROMPT = f"""{BASE_SYSTEM_PROMPT}
@@ -795,6 +810,107 @@ JSON 형식으로만 반환하세요. 다른 텍스트는 포함하지 마세요
         }
 
 
+def ensure_serializable(value):
+    """
+    msgpack 직렬화 가능한 형태로 변환
+    
+    Phase 1: 나중에 사용할 준비용 함수
+    Enum 객체를 문자열로 변환하여 State 저장 시 직렬화 오류 방지
+    
+    Args:
+        value: 변환할 값 (Enum, list, dict 등)
+    
+    Returns:
+        msgpack 직렬화 가능한 형태 (기본 타입만)
+    """
+    from enum import Enum
+    
+    if isinstance(value, Enum):
+        return value.name  # Enum → str (예: TutorAct.SE_ACKNOWLEDGE → "SE_ACKNOWLEDGE")
+    
+    if isinstance(value, list):
+        return [ensure_serializable(v) for v in value]
+    
+    if isinstance(value, dict):
+        return {k: ensure_serializable(v) for k, v in value.items()}
+    
+    # str, int, float, bool, None 등 기본 타입은 그대로 반환
+    return value
+
+
+def call_agency_tutor_safely(
+    conversation_history: List[Dict[str, str]],
+    student_message: str,
+    intent_history: List,
+    assessment_history: List,
+    phase_context: str = "execution"
+):
+    """
+    AgencyTutor를 안전하게 호출하는 헬퍼 함수
+    
+    LangGraph를 사용하지 않는 기존 AgencyTutor를 사용하여
+    직렬화 문제를 완전히 회피
+    
+    Args:
+        conversation_history: 대화 이력 (List[Dict[str, str]])
+        student_message: 학생 메시지
+        intent_history: 튜터 행동 이력 (문자열 리스트)
+        assessment_history: 평가 이력 (문자열 리스트)
+        phase_context: 단계 컨텍스트
+    
+    Returns:
+        Tuple[str, List[str], str]: (응답, 직렬화된 intent, assessment)
+    """
+    from src.agency.Tutor import AgencyTutor
+    from src.agency.prompts.TutorActTaxonomy import TutorAct
+    from enum import Enum
+    
+    # Enum으로 역직렬화 (AgencyTutor는 Enum 리스트를 기대)
+    def deserialize_intent(value):
+        if isinstance(value, Enum):
+            return value
+        if isinstance(value, str):
+            try:
+                return TutorAct[value]
+            except (KeyError, AttributeError):
+                return value
+        if isinstance(value, list):
+            return [deserialize_intent(v) for v in value]
+        return value
+    
+    intent_history_for_tutor = [deserialize_intent(item) for item in intent_history]
+    
+    # OpenAI 클라이언트 가져오기 (함수 스코프 내에서만 존재)
+    client = get_openai_client()
+    if not client:
+        raise ValueError("OpenAI 클라이언트를 가져올 수 없습니다.")
+    
+    # AgencyTutor 인스턴스 생성 (LangGraph 없음 = 직렬화 문제 없음)
+    tutor = AgencyTutor(
+        client=client,
+        model="gpt-4.1",
+        intent_history=intent_history_for_tutor,
+        assessment_history=assessment_history,
+        open=True
+    )
+    
+    # conversation_history에 student_message를 추가하여 전체 대화 구성
+    full_conversation = conversation_history + [{"role": "user", "content": student_message}]
+    
+    # 응답 생성 (Phase 3: phase_context 전달)
+    response, _, _, _, intent, assessment = tutor.get_response(
+        conversation_history=full_conversation,
+        messages_student=student_message,
+        max_tokens=1500,
+        phase_context=phase_context
+    )
+    
+    # intent 직렬화 (Enum → str)
+    serialized_intent = ensure_serializable(intent)
+    
+    return response, serialized_intent, assessment
+
+
 def execution_node(state: LearningAgentState):
     """실행 단계 대화 처리"""
     llm_tools = get_llm_with_tools()
@@ -823,12 +939,14 @@ def execution_node(state: LearningAgentState):
         # finalize_planning에서 온 직후 패턴:
         # - 마지막 메시지: ToolMessage (프롬프트 생성 완료)
         if isinstance(last_msg, ToolMessage) and "프롬프트가 생성되었습니다" in last_msg.content:
-            # 실행 단계 대화 시작 (완료 체크 건너뛰기)
-            messages = execution_tracker(state["messages"])
-            response = llm_tools["execution"].invoke(messages)
+            # 실행 단계 첫 대화 시작 - 기존 LLM 사용 (AgencyTutor는 사용자 입력 이후부터)
+            messages_with_tracker = execution_tracker(state["messages"])
+            response = llm_tools["execution"].invoke(messages_with_tracker)
             return {
                 "messages": [response],
-                "waiting_for_input": True
+                "waiting_for_input": True,
+                "execution_intent_history": state.get("execution_intent_history"),
+                "execution_assessment_history": state.get("execution_assessment_history"),
             }
     
     # 마지막 사용자 메시지가 '분석 완료'인지 확인
@@ -854,16 +972,76 @@ def execution_node(state: LearningAgentState):
             "phase": "reflection",
             "waiting_for_input": False,
             "phase_end_indices": phase_end_indices,
+            "execution_intent_history": state.get("execution_intent_history"),
+            "execution_assessment_history": state.get("execution_assessment_history"),
         }
     
-    # 일반적인 실행 단계 대화
-    messages = execution_tracker(state["messages"])
-    response = llm_tools["execution"].invoke(messages)
-    return {
-        "messages": [response],
-        "waiting_for_input": True,
-        "phase_end_indices": state.get("phase_end_indices"),  # 기존 값 유지
-    }
+    # 일반적인 실행 단계 대화 - AgencyTutorLG 사용
+    try:
+        # execution 단계 메시지만 추출
+        execution_messages = get_phase_messages(
+            messages,
+            "execution",
+            state.get("phase_end_indices")
+        )
+        
+        # conversation_history로 변환
+        conversation_history = convert_langchain_to_history(execution_messages)
+        
+        # 마지막 사용자 메시지 추출
+        student_message = extract_last_user_message(execution_messages)
+        
+        # student_message가 없으면 대기 상태
+        if not student_message:
+            return {
+                "messages": [],
+                "waiting_for_input": True,
+                "phase_end_indices": state.get("phase_end_indices"),
+                "execution_intent_history": state.get("execution_intent_history"),
+                "execution_assessment_history": state.get("execution_assessment_history"),
+            }
+        
+        # State에서 히스토리 가져오기
+        raw_intent_history = state.get("execution_intent_history") or []
+        raw_assessment_history = state.get("execution_assessment_history") or []
+        
+        # AgencyTutorLG 안전하게 호출
+        response, serialized_intent, assessment = call_agency_tutor_safely(
+            conversation_history=conversation_history,
+            student_message=student_message,
+            intent_history=raw_intent_history,
+            assessment_history=raw_assessment_history,
+            phase_context="execution"
+        )
+        
+        # 히스토리 업데이트
+        new_intent_history = list(raw_intent_history)
+        new_intent_history.append(serialized_intent)
+        new_assessment_history = list(raw_assessment_history)
+        new_assessment_history.append(assessment)
+        
+        return {
+            "messages": [AIMessage(content=response)],
+            "waiting_for_input": True,
+            "phase_end_indices": state.get("phase_end_indices"),
+            "execution_intent_history": new_intent_history,
+            "execution_assessment_history": new_assessment_history,
+        }
+        
+    except Exception as e:
+        # 에러 발생 시 기존 방식으로 폴백
+        print(f"AgencyTutorLG 호출 실패: {e}")
+        import traceback
+        traceback.print_exc()
+        messages_with_tracker = execution_tracker(state["messages"])
+        response = llm_tools["execution"].invoke(messages_with_tracker)
+        return {
+            "messages": [response],
+            "waiting_for_input": True,
+            "phase_end_indices": state.get("phase_end_indices"),
+            "execution_intent_history": state.get("execution_intent_history"),
+            "execution_assessment_history": state.get("execution_assessment_history"),
+        }
 
 def summarize_execution_conversation(state: LearningAgentState):
     """실행 단계 대화 요약 생성 - Stage 3 시작 시 자동 실행"""
