@@ -11,9 +11,7 @@ __pycache__/
 .env
 .venv/
 
-*/.sqlite
 checkpoints.sqlite
-
 .sqlite
 .sqlite-shm
 .sqlite-wal
