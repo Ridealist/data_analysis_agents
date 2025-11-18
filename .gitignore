@@ -10,3 +10,10 @@ __pycache__/
 */.env
 .env
 .venv/
+
+*/.sqlite
+checkpoints.sqlite
+
+.sqlite
+.sqlite-shm
+.sqlite-wal
