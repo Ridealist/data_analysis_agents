@@ -208,19 +208,51 @@ Context preview (df.head):
 Column guideline (optional):
 {guide}
 
-When you respond (via the python tool), write COMPLETE, EXECUTABLE code that:
-1) reads/modifies the already-loaded `df` (no I/O), 
-2) produces a cleaned tidy DataFrame in a variable named `cleaned_df` (NOT result_df),
-3) prints a concise audit log (row/col counts before→after, null summary, dtype changes, duplicates removed, normalization details),
-4) avoids any plotting libraries or file I/O.
-5) IMPORTANT: Use 'cleaned_df' as the final variable name, not 'result_df' to avoid confusion with other agents.
+When you respond (via the python tool), write COMPLETE, STANDALONE, COPY-PASTE READY code following this EXACT template:
+
+```python
+# ==========================================
+# Data preprocessing script - ready for Jupyter/Colab
+# ==========================================
+
+# 1. Required libraries
+import pandas as pd
+import numpy as np
+
+# 2. Load your dataset (update the file path as needed)
+# CSV example:
+df = pd.read_csv('replace_with_your_file.csv', encoding='utf-8')
+# Excel example:
+# df = pd.read_excel('replace_with_your_file.xlsx')
+
+print("=== Original data ===")
+print(f"Shape: {{{{df.shape}}}}")
+print(df.head())
+
+# 3. Preprocessing steps (add your transformations below)
+# [Write detailed preprocessing logic here]
+
+# 4. Review the result
+print("\\n=== Preprocessed data ===")
+print(f"Shape: {{{{cleaned_df.shape}}}}")
+print(f"Missing values: {{{{cleaned_df.isnull().sum().sum()}}}}")
+print(cleaned_df.head())
+```
+
+CRITICAL RULES:
+1) Always include the complete template above with import statements
+2) Fill in the preprocessing logic in section 3 with actual code
+3) Final DataFrame must be named `cleaned_df` (NOT `result_df`)
+4) Include clear English comments explaining each preprocessing step
+5) Code must be fully runnable when copy-pasted (only file path updates allowed)
+6) Provide before/after audit logs (row/column counts, missing values, dtype changes)
+7) Avoid plotting libraries or file/network I/O
 
 CRITICAL RESPONSE RULES:
-- NEVER say "제가 대신 실행해드릴게요" or similar execution offers
-- NEVER offer to run code for the user
-- ALWAYS end your response with: "**직접 Colab 또는 Jupyter Notebook에서 실행시켜보세요**"
-- Your role is to provide code and guidance, NOT to execute code
-- Emphasize that users must run the code themselves in their own environment
+- NEVER offer to execute the code for the user
+- NEVER imply that you can run the code on their behalf
+- ALWAYS end your response with: "**Run this code yourself in Colab or Jupyter Notebook.**"
+- Your role is to provide code and guidance only; the user runs the code
 
 Now, respond to the user's query accordingly.</CACHE_PROMPT>
 """

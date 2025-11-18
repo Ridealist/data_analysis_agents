@@ -10,8 +10,9 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.components.learning_agent_shared import LearningAgentRunner
-from src.components.sidebar_learning import render_learning_sidebar
+from src.graph.learning_agent import LearningAgentRunner
+from src.graph.sidebars import render_learning_sidebar
+from src.graph.utils import get_phase_messages
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage, SystemMessage
 
 
@@ -49,7 +50,7 @@ def main():
     **Learning Agent - 반성 단계**
     
     이번 학습을 돌아보며 성찰해봅시다! 다음 정보를 수집합니다:
-    - ✅ 목표 달성 여부
+    - 🎯 목표 달성 여부
     - 👍 좋은 프롬프트
     - 👎 개선이 필요한 프롬프트
     - 💡 새롭게 배운 것
@@ -59,7 +60,7 @@ def main():
     agent = LearningAgentRunner()
     
     # 사이드바 렌더링
-    render_learning_sidebar(agent)
+    render_learning_sidebar(agent, current_page="stage3")
     
     # 메인 영역
     state = agent.get_state()
@@ -87,84 +88,79 @@ def main():
 """)
         
         st.divider()
-        
-        # 대화 이력 표시 (반성 단계 메시지만)
-        st.header("💬 대화")
-        
+
+        # 메시지/반성 경계 관리용 세션 상태
+        if "stage3_reflection_start_idx" not in st.session_state:
+            st.session_state["stage3_reflection_start_idx"] = None
+
+        # 현재 메시지 스냅샷
         messages = state.get("messages", [])
-        reflection_info = state.get("reflection_info")  # State에서 직접 가져오기
+        reflection_info = state.get("reflection_info")
+        phase_end_indices = state.get("phase_end_indices")
+
+        # Reflection 단계 메시지만 필터링
+        reflection_messages = get_phase_messages(messages, "reflection", phase_end_indices)
+
+        st.header("💬 대화")
+
+        # 안내 메시지(항상 고정으로 맨 위에 표시)
+        with st.chat_message("assistant"):
+            st.markdown("🪞 Stage 3를 시작해요. 아래 중 하나를 선택해주세요: \n\n 1. 반성 진행 \n 2. 실행 단계 대화 요약 \n\n 원하는 선택을 '반성' 또는 '요약'으로 답해주세요.")
         
-        # 반성 단계 시작 시점 찾기
-        reflection_start_idx = 0
-        for i, msg in enumerate(messages):
-            if isinstance(msg, AIMessage) and "실행 단계를 완료했습니다" in msg.content:
-                reflection_start_idx = i
-                break
-        
-        # 반성 단계 메시지만 표시
-        for msg in messages[reflection_start_idx:]:
+        # 반성 단계 메시지 표시
+        for msg in reflection_messages:   
             if not isinstance(msg, SystemMessage):
+                # 특별한 요약 생성 메시지는 표시하지 않음
+                if isinstance(msg, HumanMessage) and msg.content == "__GENERATE_SUMMARY__":
+                    continue
                 render_message(msg, reflection_info)
         
-        st.divider()
+        # # 요약 메시지 이후의 메시지만 표시 (반성 단계 메시지)
+        # reflection_start_idx = 0
+        # for i, msg in enumerate(messages):
+        #     if isinstance(msg, AIMessage) and "실행 단계 대화 요약이 완료되었습니다" in msg.content:
+        #         reflection_start_idx = i + 1
+        #         break
         
+        # # 요약 메시지도 표시
+        # for i, msg in enumerate(messages):
+        #     if isinstance(msg, AIMessage) and "실행 단계 대화 요약이 완료되었습니다" in msg.content:
+        #         st.chat_message("assistant").write(msg.content)
+        #         break
+        
+        # # 반성 단계 메시지 표시
+        # for msg in messages[reflection_start_idx:]:
+        #     if not isinstance(msg, SystemMessage):
+        #         # 특별한 요약 생성 메시지는 표시하지 않음
+        #         if isinstance(msg, HumanMessage) and msg.content == "__GENERATE_SUMMARY__":
+        #             continue
+        #         render_message(msg, reflection_info)
+
         if reflection_completed or current_phase == "complete":
             st.success("🎉 모든 학습 과정이 완료되었습니다!")
-            
-            # 최종 요약 표시
-            for msg in reversed(messages):
-                if isinstance(msg, AIMessage) and "학습 과정 요약" in msg.content:
-                    with st.expander("📊 학습 과정 전체 요약", expanded=True):
-                        st.markdown(msg.content)
-                    break
-            
-            # 반성 정보 카드 형태로 표시 - State에서 직접 가져오기
-            if reflection_info:
-                st.divider()
-                st.subheader("💭 나의 반성 내용")
-                
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.markdown("**✅ 목표 달성 여부**")
-                    st.info(reflection_info.get('goal_achievement', 'N/A'))
-                    
-                    st.markdown("**💡 새롭게 배운 것**")
-                    st.success(reflection_info.get('new_learning', 'N/A'))
-                
-                with col2:
-                    st.markdown("**👍 좋은 프롬프트**")
-                    st.success(reflection_info.get('best_prompt', 'N/A'))
-                    
-                    st.markdown("**👎 개선이 필요한 프롬프트**")
-                    st.warning(reflection_info.get('worst_prompt', 'N/A'))
-            
+
             # 다운로드 옵션
             st.divider()
-            
+
             import json
-            
-            # 학습 요약 데이터 - State에서 직접 가져오기
             summary_data = {
                 "planning": state.get("planning_info"),
                 "reflection": state.get("reflection_info")
             }
-            
             summary_json = json.dumps(summary_data, ensure_ascii=False, indent=2)
-            
+
             st.download_button(
                 label="📥 학습 요약 다운로드 (JSON)",
                 data=summary_json,
                 file_name="learning_summary.json",
                 mime="application/json"
             )
-            
-            # 새로운 학습 시작
+
             if st.button("🆕 새로운 학습 시작하기", type="primary"):
                 agent.reset()
                 st.success("새로운 학습을 시작합니다!")
-                st.rerun()
-        
+                st.rerun()        
+
         else:
             # 사용자 입력
             st.subheader("메시지 입력")

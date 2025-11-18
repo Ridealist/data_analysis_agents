@@ -5,7 +5,7 @@ LangGraph 기반 교육 에이전트 메인 인터페이스
 내부 구현은 LangGraph 워크플로우 사용
 """
 
-from typing import Tuple, List, Any
+from typing import Tuple, List, Any, Optional
 from .graph.workflow import create_agency_graph
 
 
@@ -58,7 +58,8 @@ class AgencyTutorLG:
         self,
         conversation_history: list,
         messages_student: str,
-        max_tokens: int = 1500
+        max_tokens: int = 1500,
+        phase_context: Optional[str] = None
     ) -> Tuple[str, int, int, int, List, str]:
         """
         일반 응답 생성 (Non-streaming)
@@ -90,7 +91,8 @@ class AgencyTutorLG:
                 "model": self.model,
                 "client": self.client,
                 "intent_history": self.intent_history,
-                "assessment_history": self.assessment_history
+                "assessment_history": self.assessment_history,
+                "phase_context": phase_context
             }
         }
         
@@ -115,7 +117,8 @@ class AgencyTutorLG:
         self,
         conversation_history: list,
         messages_student: str,
-        max_tokens: int = 1500
+        max_tokens: int = 1500,
+        phase_context: Optional[str] = None
     ) -> Tuple[Any, List, str]:
         """
         스트리밍 응답 생성
@@ -126,6 +129,7 @@ class AgencyTutorLG:
             conversation_history: 대화 이력 (List[Dict[str, str]])
             messages_student: 학생의 메시지
             max_tokens: 최대 토큰 수
+            phase_context: 단계 컨텍스트 ("execution" 등)
         
         Returns:
             Tuple[Any, List, str]:
@@ -144,7 +148,8 @@ class AgencyTutorLG:
                 "model": self.model,
                 "client": self.client,
                 "intent_history": self.intent_history,
-                "assessment_history": self.assessment_history
+                "assessment_history": self.assessment_history,
+                "phase_context": phase_context
             }
         }
         
@@ -160,4 +165,3 @@ class AgencyTutorLG:
         self.assessment_history.append(assessment)
         
         return stream, intent, assessment
-

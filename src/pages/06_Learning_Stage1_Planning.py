@@ -10,9 +10,28 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.components.learning_agent_shared import LearningAgentRunner
-from src.components.sidebar_learning import render_learning_sidebar
+from src.graph.learning_agent import LearningAgentRunner
+from src.graph.utils import get_phase_messages
+from src.graph.sidebars import render_learning_sidebar
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+
+
+def show_planning_info(planning_data: dict):
+    """계획 정보 표시"""
+    if not planning_data:
+        st.warning("⚠️ 계획 정보가 없습니다.")
+        return
+    
+    st.subheader("📋 수집된 계획 정보")
+    
+    st.markdown("### 📊 데이터 설명")
+    st.info(planning_data.get('dataset_description', 'N/A'))
+    
+    st.markdown("### 🎯 분석 목표")
+    st.info(planning_data.get('data_analysis_objective', 'N/A'))
+    
+    st.markdown("### 📋 분석 계획")
+    st.info(planning_data.get('data_analysis_plan', 'N/A'))
 
 
 def render_message(msg, planning_info=None):
@@ -21,12 +40,9 @@ def render_message(msg, planning_info=None):
         st.chat_message("user").write(msg.content)
     elif isinstance(msg, AIMessage):
         if msg.tool_calls:
-            # Tool call 정보 표시 - planning_info 사용
-            with st.chat_message("assistant"):
-                st.write("📝 계획이 수립되었습니다!")
-                if planning_info:
-                    with st.expander("수집된 정보 보기"):
-                        st.json(planning_info)
+            # Tool call이 있으면 자동으로 정보를 표시하지 않음
+            # 사용자가 "계획 확인" 버튼을 선택했을 때만 표시
+            pass
         else:
             st.chat_message("assistant").write(msg.content)
     elif isinstance(msg, ToolMessage):
@@ -54,11 +70,11 @@ def main():
     # Runner 초기화
     agent = LearningAgentRunner()
     
-    # 사이드바 렌더링
-    render_learning_sidebar(agent)
-    
     # 메인 영역: 대화 인터페이스
     state = agent.get_state()
+    
+    # 사이드바 렌더링
+    render_learning_sidebar(agent, current_page="stage1")
     
     # 초기 실행 (메시지가 없는 경우)
     if not state or not state.get("messages"):
@@ -71,34 +87,48 @@ def main():
         st.header("💬 대화")
         
         messages = state["messages"]
-        planning_info = state.get("planning_info")  # State에서 직접 가져오기
+        planning_info = state.get("planning_info")
+        phase_end_indices = state.get("phase_end_indices")
         
-        # 모든 메시지 표시
-        for msg in messages:
+        # Planning 단계 메시지만 필터링
+        planning_messages = get_phase_messages(messages, "planning", phase_end_indices)
+        
+        for msg in planning_messages:
             render_message(msg, planning_info)
         
         st.divider()
         
         # 현재 상태 확인
-        current_phase = state.get("phase", "planning")
         planning_completed = state.get("planning_completed", False)
         
+        # 사용자 입력에서 '계획 수정' 확인 의도 체크 (시스템 레벨 처리)
+        if messages and isinstance(messages[-1], HumanMessage):
+            last_user_input = messages[-1].content.strip().lower()
+            reset_keywords = ["계획 수정", "초기화", "다시 시작", "처음부터", "리셋"]
+            confirm_keywords = ["확인", "네", "예", "yes", "ok", "좋아"]
+            
+            # '계획 수정' 관련 키워드가 있고, 확인 의도가 있으면 reset 실행
+            has_reset_keyword = any(keyword in last_user_input for keyword in reset_keywords)
+            has_confirm = any(keyword in last_user_input for keyword in confirm_keywords)
+            
+            # 이전 LLM 메시지에서 '계획 수정' 확인 요청이 있었는지 체크
+            needs_reset_confirmation = False
+            for msg in reversed(messages[:-1]):  # 마지막 사용자 메시지 제외
+                if isinstance(msg, AIMessage) and not msg.tool_calls:
+                    if "처음부터 다시 시작" in msg.content or "계획을 처음부터" in msg.content:
+                        needs_reset_confirmation = True
+                        break
+            
+            # 확인이 필요한 상황이고 사용자가 확인했다면 reset 실행
+            if needs_reset_confirmation and has_confirm:
+                with st.spinner("계획을 초기화하고 처음부터 다시 시작합니다..."):
+                    agent.reset_planning()
+                st.rerun()
+
+        # ... 기존 완료 메시지 코드 ...
         if planning_completed and planning_info:
             st.success("✅ 계획 단계가 완료되었습니다!")
-            st.info("👉 좌측 사이드바에서 'Stage 2: 실행'으로 이동하세요")
-            
-            # 수집된 계획 정보 표시 - State에서 직접 가져온 정보 사용
-            with st.expander("📋 수립된 계획 확인", expanded=True):
-                st.markdown(f"""
-**데이터 설명:**  
-{planning_info.get('dataset_description', 'N/A')}
-
-**분석 목표:**  
-{planning_info.get('data_analysis_objective', 'N/A')}
-
-**분석 계획:**  
-{planning_info.get('data_analysis_plan', 'N/A')}
-""")
+            st.info("👈️ 좌측 사이드바에서 생성된 프롬프트를 확인하고 'Stage 2: 실행'으로 이동하세요")
         
         else:
             # 사용자 입력
@@ -135,18 +165,18 @@ def main():
     # State Inspector (개발자용)
     with st.expander("🔧 전체 State 보기 (개발자용)"):
         if state:
-            display_state = {
-                "phase": state.get("phase"),
-                "planning_completed": state.get("planning_completed"),
-                "execution_completed": state.get("execution_completed"),
-                "reflection_completed": state.get("reflection_completed"),
-                "planning_info": state.get("planning_info"),
-                "reflection_info": state.get("reflection_info"),
-                "message_count": len(state.get("messages", []))
-            }
-            st.json(display_state)
+            st.write(state)
+            # display_state = {
+            #     "phase": state.get("phase"),
+            #     "planning_completed": state.get("planning_completed"),
+            #     "execution_completed": state.get("execution_completed"),
+            #     "reflection_completed": state.get("reflection_completed"),
+            #     "planning_info": state.get("planning_info"),
+            #     "reflection_info": state.get("reflection_info"),
+            #     "message_count": len(state.get("messages", []))
+            # }
+            # st.json(display_state)
 
 
 if __name__ == "__main__":
     main()
-

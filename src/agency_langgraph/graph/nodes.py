@@ -77,10 +77,13 @@ def generate_prompt_node(state: AgencyState) -> Dict[str, Any]:
         Dict: 업데이트할 필드
         - messages: LLM API에 전달할 메시지 리스트
     """
+    phase_context = state["config"].get("phase_context")
+    
     messages = generate_messages(
         conversation_history=state["conversation_history"],
         student_message=state["student_message"],
-        tutor_acts=state["tutor_acts"]
+        tutor_acts=state["tutor_acts"],
+        phase_context=phase_context
     )
     
     return {"messages": messages}

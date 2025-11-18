@@ -10,22 +10,8 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.components.learning_agent_shared import LearningAgentRunner
-from src.components.sidebar_learning import render_learning_sidebar
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage, SystemMessage
-
-
-def render_message(msg):
-    """메시지 렌더링"""
-    if isinstance(msg, HumanMessage):
-        st.chat_message("user").write(msg.content)
-    elif isinstance(msg, AIMessage):
-        st.chat_message("assistant").write(msg.content)
-    elif isinstance(msg, ToolMessage):
-        st.chat_message("assistant").write(msg.content)
-    elif isinstance(msg, SystemMessage):
-        # SystemMessage는 표시하지 않음
-        pass
+from src.graph.learning_agent import LearningAgentRunner
+from src.graph.sidebars import render_learning_sidebar
 
 
 def main():
@@ -41,14 +27,14 @@ def main():
     **Learning Agent - 실행 단계**
     
     이제 계획한 대로 데이터 분석을 실행해봅시다!  
-    튜터와 대화하며 분석을 진행하고, 완료되면 **"완료"**라고 입력하세요.
+    **좌측 사이드바에서** 튜터와 대화하며 분석을 진행하고, 완료되면 **"완료"** 버튼을 클릭하세요.
     """)
     
     # Runner 초기화
     agent = LearningAgentRunner()
     
-    # 사이드바 렌더링
-    render_learning_sidebar(agent)
+    # 사이드바 렌더링 (Stage 2일 때 사이드바에 대화 인터페이스 표시)
+    render_learning_sidebar(agent, current_page="stage2")
     
     # 메인 영역
     state = agent.get_state()
@@ -75,92 +61,18 @@ def main():
 {planning_info.get('data_analysis_plan', 'N/A')}
 """)
         
-        # 실행 단계가 아직 시작 안 된 경우 안내 메시지 표시
+        # 실행 단계 안내
         if current_phase == "planning":
-            st.info("계획 단계가 완료되었습니다. 아래에서 대화를 시작하세요!")
-        
-        st.divider()
-        
-        # 대화 이력 표시
-        st.header("💬 대화")
-        
-        messages = state.get("messages", [])
-        
-        # 실행 단계 시작 시점 찾기 (finalize_planning의 ToolMessage 이후부터)
-        execution_start_idx = 0
-        for i, msg in enumerate(messages):
-            if isinstance(msg, ToolMessage) and "계획이 완성되었습니다" in msg.content:
-                execution_start_idx = i
-                break
-        
-        # 실행 단계 메시지만 표시
-        for msg in messages[execution_start_idx:]:
-            if not isinstance(msg, SystemMessage):
-                render_message(msg)
-        
-        st.divider()
-        
-        if execution_completed:
-            st.success("✅ 실행 단계가 완료되었습니다!")
-            
-            # Phase 확인
-            if current_phase == "reflection":
-                st.info("👉 좌측 사이드바에서 'Stage 3: 반성'으로 이동하세요")
+            st.info("✅ 계획 단계가 완료되었습니다. 좌측 사이드바에서 대화를 시작하세요!")
+        elif current_phase == "execution":
+            if execution_completed:
+                st.success("✅ 실행 단계가 완료되었습니다!")
+                st.info("👈️ 좌측 사이드바에서 'Stage 3: 반성'으로 이동하세요")
             else:
-                st.warning("⚠️ Phase가 아직 reflection으로 전환되지 않았습니다. 잠시만 기다려주세요...")
-                st.rerun()
-        else:
-            # 사용자 입력
-            st.subheader("메시지 입력")
-            
-            # 도움말
-            col1, col2 = st.columns([3, 2])
-            
-            with col1:
-                st.info("💡 **Tip:** 분석 중 궁금한 점을 자유롭게 질문하세요!")
-            
-            with col2:
-                st.warning("⚠️ 분석이 완료되면 **'완료'**라고 입력하세요")
-            
-            # 예제 질문
-            with st.expander("💭 예제 질문 보기"):
-                example_questions = [
-                    "데이터를 먼저 살펴봤는데, 이상한 값들이 보여요",
-                    "분석 결과를 어떻게 해석해야 할지 모르겠어요",
-                    "시각화를 만들었는데 의미가 있는지 모르겠어요",
-                    "다음 단계로 무엇을 해야 할까요?",
-                ]
-                
-                for i, q in enumerate(example_questions, 1):
-                    if st.button(f"{i}. {q}", key=f"example_{i}"):
-                        st.session_state.execution_input = q
-                        st.rerun()
-            
-            user_input = st.text_area(
-                "메시지를 입력하세요:",
-                key="execution_input",
-                placeholder="분석 중 궁금한 점을 질문하거나, 완료했으면 '완료'라고 입력하세요...",
-                height=100
-            )
-            
-            col1, col2, col3 = st.columns([1, 1, 3])
-            
-            with col1:
-                send_button = st.button("📤 전송", type="primary", use_container_width=True)
-            
-            with col2:
-                complete_button = st.button("✅ 완료", type="secondary", use_container_width=True)
-            
-            if send_button and user_input.strip():
-                with st.spinner("응답 생성 중..."):
-                    result = agent.send_message(user_input)
-                st.rerun()
-            elif complete_button:
-                with st.spinner("다음 단계로 이동 중..."):
-                    result = agent.send_message("완료")
-                st.rerun()
-            elif send_button:
-                st.warning("메시지를 입력해주세요")
+                st.info("💡 좌측 사이드바에서 튜터와 대화하며 분석을 진행하세요!")
+        elif current_phase == "reflection":
+            st.success("✅ 실행 단계가 완료되었습니다!")
+            st.info("👈️ 좌측 사이드바에서 'Stage 3: 반성'으로 이동하세요")
     
     # State Inspector (개발자용)
     with st.expander("🔧 전체 State 보기 (개발자용)"):
