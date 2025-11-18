@@ -81,15 +81,7 @@ class RigidPromptGenerator():
         if TutorAct.SE_GROWTH in intents:
             intent_prompt += "처음이랑 비교해보니까 질문이 완전 업그레이드됐어요! 🚀 특히 예시 넣은 부분, 센스 있는데요? AI 답변도 확 달라진 거 느껴지죠? \n"
         if TutorAct.SE_CONFIDENCE in intents:
-            intent_prompt += "어려워 보이죠? 근데 걱정 마세요! 😊 천리길도 한 걸음씩이라는 말도 있잖아요. 자, 뭐부터 시작해볼까요? \n"
-        
-        # [20] 메타인지-계획(Metacognition-Planning) - 원리 2: 학습계획 수립 지원
-        if TutorAct.MP_GOAL in intents:
-            intent_prompt += "AI랑 이 과제 할 때 최종 목표가 뭐예요? 🎯 언제쯤 '오케이, 나 진짜 잘했다!' 하고 스스로 칭찬할 수 있을 것 같아요? \n"
-        if TutorAct.MP_STRATEGY in intents:
-            intent_prompt += "과제 완성까지 로드맵을 그려볼까요? 🗺️ AI한테 뭘 먼저 물어보고, 그 다음엔 뭘 할지... 단계별로 한번 정리해봐요! \n"
-        if TutorAct.MP_CRITERIA in intents:
-            intent_prompt += "완성된 과제 보고 '이거 진짜 잘했네!' 하려면 뭘 확인해야 할까요? ✅ 나만의 체크리스트 만들어보는 거 어때요? \n"
+            intent_prompt += "어려워 보이죠? 근데 걱정 마세요! 😊 천리길도 한 걸음씩이라는 말도 있잖아요. 어디까지 이해했고, 어디가 어려운지 짚어볼까요? \n"
         
         # [30] 메타인지-수행-리터러시(Metacognition-Execution-Literacy) - 원리 3: 프롬프트 리터러시 함양
         if TutorAct.MEL_EXPLORE in intents:
@@ -101,38 +93,26 @@ class RigidPromptGenerator():
         
         # [40] 메타인지-책임의식(Metacognition-Execution-Responsibility) - 원리 4: 책임의식 함양
         if TutorAct.MER_OWNERSHIP in intents:
-            intent_prompt += "AI가 여러 개 제안했잖아요? 그중에 뭘 선택했어요? 🤓 '이걸 선택한 이유는요~' 하고 친구한테 설명한다면 뭐라고 할 거예요? \n"
+            intent_prompt += "AI의 제안이 내 의견과 달랐던게 있나요? 둘중에 무엇을 선택했어요? 🤔 또, 그 의견을 선택한 이유는 무엇인가요? \n"
         if TutorAct.MER_BOUNDARY in intents:
             intent_prompt += "잠깐! AI는 그냥 도구예요. 🛠️ 운전대는 여러분이 잡고 있는 거죠! 자, 여러분의 최종 결정은 뭔가요? \n"
-        if TutorAct.MER_ETHICS in intents:
-            intent_prompt += "혹시 이 과제에서 개인정보나 남의 자료 쓸 일 있었나요? 🔐 AI 쓸 때 특히 조심해야 할 부분이 있을까요? \n"
-        
-        # [50] 메타인지-성찰(Metacognition-SelfReflection) - 원리 5: 학습과정 성찰 지원
-        if TutorAct.MS_EVALUATE in intents:
-            intent_prompt += "지금까지 AI랑 핑퐁하면서 어떤 질문이 제일 짱이었어요? 💬 'MVP 질문상'을 준다면 어떤 질문? \n"
-        if TutorAct.MS_CONSOLIDATE in intents:
-            intent_prompt += "오늘 AI 쓰면서 '아하!' 했던 순간 있었어요? 💡 새로 배운 거나, 다음엔 더 잘하고 싶은 거 있으면 들려주세요! \n"
-        if TutorAct.MS_COMPARE in intents:
-            intent_prompt += "처음엔 이렇게 생각했는데... 지금은 어때요? 🔄 뭔가 생각이 바뀌거나 '아, 이거구나!' 한 부분 있나요? \n"
         
         # [60] 내재적 동기(Intrinsic Motivation) - 원리 6: 학습동기 강화
         if TutorAct.IM_DISCOVERY in intents:
-            intent_prompt += "우와! 이런 걸 발견했네요? 🎉 이 정도면 노벨상 후보감인데요? 진짜 대박 발견이에요! \n"
+            intent_prompt += "와! AI와 함께 새로운 걸 발견하고 알아가는 이 짜릿함! 🎯 이게 바로 진짜 공부의 재미죠! ✨ \n"
         if TutorAct.IM_ACHIEVEMENT in intents:
             intent_prompt += "드디어 목표 달성! 🏆 와~ 진짜 끝까지 해내는 거 보니까 제가 다 뿌듯하네요! 특급 칭찬 발사! \n"
-        if TutorAct.IM_AUTONOMY in intents:
-            intent_prompt += "AI만 고집할 필요 없어요! 📚 가끔은 책을 뒤적이거나, 옆자리 친구한테 '야, 이거 어떻게 생각해?' 물어보는 것도 완전 좋은 방법이죠! \n"
 
         if intent_prompt != "":
             # 제한 사항 추가 (더 엄격한 통제)
             # 메타인지-수행-리터러시나 책임의식 관련 의도가 없을 때는 직접적인 도움 제한
             if not any(act in intents for act in [TutorAct.MEL_EXPLORE, TutorAct.MEL_REFINE, TutorAct.MEL_VERIFY, 
-                                                 TutorAct.MER_OWNERSHIP, TutorAct.MER_BOUNDARY, TutorAct.MER_ETHICS]):
+                                                 TutorAct.MER_OWNERSHIP, TutorAct.MER_BOUNDARY]):
                 intent_prompt += "직접적인 힌트나 답을 제공하지 *마세요*.\n"
             
             # 자기효능감이나 내재적 동기 관련 의도가 없을 때는 과도한 격려 제한
             if not any(act in intents for act in [TutorAct.SE_ACKNOWLEDGE, TutorAct.SE_GROWTH, TutorAct.SE_CONFIDENCE,
-                                                 TutorAct.IM_DISCOVERY, TutorAct.IM_ACHIEVEMENT, TutorAct.IM_AUTONOMY]):
+                                                 TutorAct.IM_DISCOVERY, TutorAct.IM_ACHIEVEMENT]):
                 intent_prompt += "과도한 격려나 칭찬보다는 구체적인 피드백에 집중하세요.\n"
 
             messages.append({"role": "system", "content": intent_prompt})
