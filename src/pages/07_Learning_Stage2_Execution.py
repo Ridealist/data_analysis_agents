@@ -672,6 +672,37 @@ def update_ui_from_queues(
 
 
 # ============================================================
+# CSV Agent용 프롬프트 헬퍼
+# ============================================================
+
+def get_combined_prefix_prompt(learning_agent: LearningAgentRunner) -> str:
+    """
+    Stage 1에서 생성된 프롬프트와 기본 prefix 프롬프트를 결합합니다.
+
+    우선순위:
+    1) 사용자가 Stage1 사이드바에서 수정한 프롬프트 (st.session_state['sidebar_generated_prompt'])
+    2) LearningAgent state에 저장된 generated_prompt
+    3) 기본 AGENT_PREFIX_PROMPT
+    """
+    # 1) Stage1 사이드바에서 수정된 프롬프트
+    edited_prompt = (st.session_state.get("sidebar_generated_prompt") or "").strip()
+
+    # 2) LangGraph 상태에 저장된 자동 생성 프롬프트
+    state = learning_agent.get_state() if learning_agent is not None else None
+    generated_prompt = (state.get("generated_prompt") or "").strip() if state else ""
+
+    # 우선순위: 수정된 값 > 자동 생성 값
+    base_prompt = edited_prompt or generated_prompt
+
+    if base_prompt and AGENT_PREFIX_PROMPT:
+        return f"{base_prompt}\n\n{AGENT_PREFIX_PROMPT}"
+    elif base_prompt:
+        return base_prompt
+    else:
+        return AGENT_PREFIX_PROMPT
+
+
+# ============================================================
 # CSV Agent 메인 UI (Stage2용)
 # ============================================================
 
@@ -755,11 +786,15 @@ def render_csv_agent_execution_ui(learning_agent: LearningAgentRunner):
     if st.session_state.get("api_key_updated"):
         if st.session_state.get("df_UploadData") is not None:
             set_openai_api_key()
+
+            # Stage1 프롬프트 + 기본 prefix 결합
+            combined_prefix = get_combined_prefix_prompt(learning_agent)
+
             st.session_state["agent_with_UploadData"] = create_agent(
                 dataframe=st.session_state["df_UploadData"],
                 selected_model=st.session_state["model_option_general"],
                 api_key=st.session_state["openai_api_key"],
-                prefix_prompt=AGENT_PREFIX_PROMPT,
+                prefix_prompt=combined_prefix,
                 postfix_prompt=AGENT_POSTFIX_PROMPT,
                 shared_python_tool=st.session_state.get("python_tool", None),
             )
@@ -826,10 +861,13 @@ def render_csv_agent_execution_ui(learning_agent: LearningAgentRunner):
 
             set_openai_api_key()
 
+            # Stage1 프롬프트 + 기본 prefix 결합
+            combined_prefix = get_combined_prefix_prompt(learning_agent)
+
             st.session_state["agent_with_UploadData"] = create_agent(
                 dataframe=loaded_data,
                 selected_model=st.session_state["model_option_general"],
-                prefix_prompt=AGENT_PREFIX_PROMPT,
+                prefix_prompt=combined_prefix,
                 postfix_prompt=AGENT_POSTFIX_PROMPT,
                 shared_python_tool=st.session_state.get("python_tool", None),
             )
@@ -872,10 +910,13 @@ def render_csv_agent_execution_ui(learning_agent: LearningAgentRunner):
                             st.session_state["python_tool"].locals["plt"] = plt
                             st.session_state["python_tool"].locals["sns"] = sns
 
+                            # Stage1 프롬프트 + 기본 prefix 결합
+                            combined_prefix = get_combined_prefix_prompt(learning_agent)
+
                             st.session_state["agent_with_UploadData"] = create_agent(
                                 message_content,
                                 st.session_state["model_option_general"],
-                                prefix_prompt=AGENT_PREFIX_PROMPT,
+                                prefix_prompt=combined_prefix,
                                 postfix_prompt=AGENT_POSTFIX_PROMPT,
                                 shared_python_tool=st.session_state.get(
                                     "python_tool", None
@@ -982,20 +1023,25 @@ def main():
         current_phase = state.get("phase", "planning")
         execution_completed = state.get("execution_completed", False)
         planning_info = state.get("planning_info")
-        
-        # 계획 정보 표시
-        if planning_info:
-            with st.expander("📋 나의 학습 계획 (참고용)", expanded=False):
-                st.markdown(f"""
-**데이터 설명:**  
-{planning_info.get('dataset_description', 'N/A')}
 
-**분석 목표:**  
-{planning_info.get('data_analysis_objective', 'N/A')}
+        # Stage 1에서 완성된 시스템 프롬프트 표시 (사용자 수정본 우선, 없으면 자동 생성본)
+        edited_prompt = (st.session_state.get("sidebar_generated_prompt") or "").strip()
+        generated_prompt = (state.get("generated_prompt") or "").strip()
+        display_prompt = edited_prompt or generated_prompt
 
-**분석 계획 (선택):**  
-{(planning_info.get('data_analysis_plan') or '') if (planning_info.get('data_analysis_plan') or '').strip() not in ["", "N/A", "정보 없음", "없음"] else "(구체적인 계획 없이 진행)"}
-""")
+        if display_prompt:
+            with st.expander("🏷️ Stage 1에서 완성된 시스템 프롬프트", expanded=False):
+                st.text_area(
+                    "Stage 1 시스템 프롬프트",
+                    value=display_prompt,
+                    height=400,
+                    disabled=True,
+                    label_visibility="collapsed",
+                    key="stage2_display_system_prompt",
+                )
+        else:
+            with st.expander("🏷️ Stage 1에서 완성된 시스템 프롬프트", expanded=False):
+                st.info("생성된 시스템 프롬프트가 없습니다. Stage 1을 다시 진행해 주세요.")
         
         # 실행 단계 안내
         if current_phase == "planning":
@@ -1004,8 +1050,6 @@ def main():
             if execution_completed:
                 st.success("✅ 실행 단계가 완료되었습니다!")
                 st.info("👈️ 좌측 사이드바에서 'Stage 3: 반성'으로 이동하세요")
-            else:
-                st.info("💡 좌측 사이드바에서 튜터와 대화하며 분석을 진행하세요!")
         elif current_phase == "reflection":
             st.success("✅ 실행 단계가 완료되었습니다!")
             st.info("👈️ 좌측 사이드바에서 'Stage 3: 반성'으로 이동하세요")

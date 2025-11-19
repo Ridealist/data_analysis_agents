@@ -217,6 +217,7 @@ class LearningAgentState(TypedDict):
     generated_prompt: Optional[str]              # 생성된 프롬프트
     execution_summary: Optional[str]             # 실행 단계 대화 요약
     reflection_info: Optional[Dict[str, str]]    # 반성 단계 정보
+    csv_execution_history: Optional[str]         # CSV Agent TEXT 대화 원문
 
     # 완료 상태
     planning_completed: bool
@@ -700,7 +701,7 @@ def finalize_planning(state: LearningAgentState):
         
         # 성공 메시지
         if generated_prompt:
-            ai_message = "🏷️ 프롬프트가 생성되었습니다!"
+            ai_message = "🏷️ 시스템 프롬프트가 생성되었습니다! 학습 AI 에이전트가 생성한 프롬프트를 스스로 수정해보세요."
         else:
             ai_message = "⚠️ 프롬프트 생성에 실패했습니다. (결과 없음)"
             generated_prompt = None
@@ -1177,37 +1178,23 @@ def execution_node(state: LearningAgentState):
         }
 
 def summarize_execution(state: LearningAgentState):
-    """실행 단계 대화 요약 생성"""
-    messages = state.get("messages", [])
-    phase_end_indices = state.get("phase_end_indices", {})
+    """실행 단계 대화 요약 생성 (CSV Agent 대화만 요약)"""
+    # CSV Agent와 사용자 간의 데이터 분석 대화만 요약 대상
+    conversation_text = (state.get("csv_execution_history") or "").strip()
     
-    # Execution 단계의 시작과 끝 인덱스 찾기
-    execution_start_idx = phase_end_indices.get("planning", 0)
-    execution_end_idx = phase_end_indices.get("execution", len(messages))
+    # CSV 대화가 없으면 요약 불가 안내
+    if not conversation_text:
+        conversation_text = "실행 단계에서 CSV 데이터 분석 대화 기록이 저장되지 않았습니다."
+        summary = "CSV 데이터 분석 대화가 기록되지 않아 요약을 생성할 수 없습니다."
+    else:
+        # 요약 생성
+        try:
+            summary = conv_history_summary_tool.invoke({"conversation_history": conversation_text})
+        except Exception as e:
+            print(f"⚠️ 대화 요약 생성 오류: {e}")
+            summary = "대화 요약 생성에 실패했습니다."
     
-    # 실행 단계 메시지 추출
-    execution_messages = messages[execution_start_idx:execution_end_idx]
-    
-    # 메시지를 문자열로 변환
-    conversation_text = ""
-    for msg in execution_messages:
-        if isinstance(msg, HumanMessage):
-            conversation_text += f"사용자: {msg.content}\n\n"
-        elif isinstance(msg, AIMessage) and not msg.tool_calls:
-            conversation_text += f"튜터: {msg.content}\n\n"
-    
-    # 대화가 없으면 기본 메시지
-    if not conversation_text.strip():
-        conversation_text = "실행 단계에서 대화 기록이 없습니다."
-    
-    # Conversation Summary Tool 호출
-    try:
-        summary = conv_history_summary_tool.invoke({"conversation_history": conversation_text})
-    except Exception as e:
-        print(f"⚠️ 대화 요약 생성 오류: {e}")
-        summary = "대화 요약 생성에 실패했습니다."
-    
-    # 요약을 메시지로 추가 (사이드바 안내만)
+    # 메시지 및 state 업데이트
     summary_message = AIMessage(
         content="📊 실행 단계 대화 요약이 완료되었습니다!\n\n👈 왼쪽 사이드바에서 요약 내용을 확인해주세요!"
     )
@@ -1911,6 +1898,14 @@ class LearningAgentRunner:
         # 초기화 메시지 전송하여 planning 단계 시작
         self.initialize()
         return self.get_state()
+    
+    def set_csv_execution_history(self, history_text: str):
+        """CSV Agent TEXT 대화를 state에 저장"""
+        self.graph.update_state(
+            self.config,
+            {"csv_execution_history": history_text},
+            as_node="execution"
+        )
     
     def setup_test_reflection_stage(self):
         """Stage 3 테스트를 위한 더미 state 설정"""

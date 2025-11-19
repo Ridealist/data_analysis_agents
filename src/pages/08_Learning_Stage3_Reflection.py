@@ -85,7 +85,7 @@ def main():
         
         # 계획 정보 표시 (참조 가능하도록)
         if planning_info:
-            with st.expander("📋 나의 학습 계획 (참고용)", expanded=False):
+            with st.expander("📋 나의 학습 계획", expanded=False):
                 plan = planning_info.get('data_analysis_plan', '')
                 plan_display = plan if plan and plan.strip() not in ["", "N/A", "정보 없음", "없음"] else "(구체적인 계획 없이 진행)"
                 st.markdown(f"""

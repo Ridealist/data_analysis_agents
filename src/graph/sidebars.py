@@ -6,6 +6,23 @@ import streamlit as st
 from src.graph.learning_agent import LearningAgentRunner
 from src.graph.utils import get_phase_messages
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage, SystemMessage
+from src.components.dataclass import MessageRole, MessageType
+
+# ============================================================
+# Helper Functions
+# ============================================================
+
+def extract_csv_text_conversation() -> str:
+    """messages_UploadData에서 TEXT 타입만 추출"""
+    conversations = []
+    for role, content_list in st.session_state.get("messages_UploadData", []):
+        speaker = "사용자" if role == MessageRole.USER else "AI"
+        for content in content_list:
+            if (isinstance(content, list) and 
+                len(content) == 2 and 
+                content[0] == MessageType.TEXT):
+                conversations.append(f"{speaker}: {content[1]}")
+    return "\n\n".join(conversations)
 
 # ============================================================
 # UI Helper Functions
@@ -93,7 +110,7 @@ def render_execution_sidebar_chat(agent: LearningAgentRunner, state):
     if not planning_completed:
         return  # 함수 종료하여 메시지와 입력 영역을 표시하지 않음
 
-    st.header("🤔 학습 에이전트의 조언")
+    st.header("🤔 학습 AI 에이전트의 조언")
     
     messages = state.get("messages", [])
     phase_end_indices = state.get("phase_end_indices")
@@ -107,17 +124,16 @@ def render_execution_sidebar_chat(agent: LearningAgentRunner, state):
     
     with chat_container:
         if execution_messages:
+            # 학습 AI 에이전트의 조언(AIMessage, ToolMessage)만 표시
+            # 사용자 발화(HumanMessage)는 메인 화면에서 이미 보이므로 제외
             for msg in execution_messages:
-                if isinstance(msg, HumanMessage):
-                    st.chat_message("user").write(msg.content)
-                elif isinstance(msg, AIMessage):
+                if isinstance(msg, AIMessage):
                     st.chat_message("assistant").write(msg.content)
-                # ToolMessage는 내용이 있으면 표시
                 elif isinstance(msg, ToolMessage):
                     st.chat_message("assistant").write(msg.content)
         else:
             # 메시지가 없을 때 안내
-            st.info("💬 사이드바에서 튜터와 대화하며 분석을 진행하세요!")
+            st.info("💬 메인 화면에서 데이터 분석 질문을 하면, 학습 AI 에이전트의 조언이 여기에 표시됩니다.")
 
         # 메인 화면 입력에 대한 실시간 조언 표시용 placeholder (대화 영역 안에 위치)
         if not execution_completed:
@@ -130,14 +146,20 @@ def render_execution_sidebar_chat(agent: LearningAgentRunner, state):
     # 완료 상태 확인 및 안내 / 버튼
     if execution_completed:
         st.success("✅ 실행 단계가 완료되었습니다!")
-        st.info("👈️ 좌측 사이드바에서 'Stage 3: 반성'으로 이동하세요")
+        st.info("'Stage 3: 반성'으로 이동하세요")
     else:
         # 안내 및 완료 버튼
         st.info("💡 메인 화면에서 질문하면, 위 대화 영역에 튜터의 조언이 자동으로 표시됩니다.")
         
-        complete_btn = st.button("✅ 실행 단계 완료", key="execution_sidebar_complete", use_container_width=True)
+        complete_btn = st.button("✅ 실행 단계 완료", key="execution_sidebar_complete", use_container_width=True, type='primary')
         if complete_btn:
             with st.spinner("다음 단계로 이동 중..."):
+                # CSV 대화 추출 및 저장
+                csv_history = extract_csv_text_conversation()
+                if csv_history:
+                    agent.set_csv_execution_history(csv_history)
+                
+                # Phase 전환
                 agent.send_message("분석 완료")
             st.rerun()
 
@@ -182,7 +204,7 @@ def render_learning_sidebar(agent: LearningAgentRunner, current_page: str = None
             if state:
                 generated_prompt = state.get("generated_prompt")
                 if generated_prompt:
-                    st.header("🎯 생성된 시스템 프롬프트")
+                    st.header("🏷️ 생성된 시스템 프롬프트")
                     st.text_area(
                         "데이터 분석을 위한 시스템 프롬프트",
                         value=generated_prompt,
