@@ -226,7 +226,6 @@ class LearningAgentState(TypedDict):
     waiting_for_input: bool  # 사용자 입력 대기 상태
     summary_generated: bool  # 요약 생성 여부 (추가)
     awaiting_planning_confirmation: bool  # 계획 정보 수집 완료 후 사용자 확인 대기 상태
-    awaiting_reflection_confirmation: bool  # 반성 정보 수집 완료 후 사용자 확인 대기 상태
     awaiting_reflection_start_choice: bool  # 반성 시작 전 선택 대기 상태 (바로/요약)
 
     # 단계 경계 인덱스 (각 단계의 마지막 메시지 인덱스, 포함)
@@ -567,10 +566,7 @@ REFLECTION_PROMPT = f"""{BASE_SYSTEM_PROMPT}
 
 정말 잘하셨어요! 모든 반성을 깊이 있게 정리해주셨습니다 🎉
 
-다음 중 하나를 선택해주세요:
-- **'완료'**: 반성을 마무리하고 학습 요약 보기
-- **'반성 확인'**: 수집된 반성 내용 다시 보기
-- **'반성 수정'**: 처음부터 다시 시작하기
+이번 세션의 학습 여정을 마무리할게요. 수고 많으셨습니다!
 ```
 """
 
@@ -1288,20 +1284,25 @@ def reflection_node(state: LearningAgentState):
             flags=re.IGNORECASE
         )
         
-        # ✅ 6개 수집 완료 패턴 시 옵션 제시 (3개 항목 × 2턴)
+        # ✅ 6개 수집 완료 패턴 시 자동 완료 처리 (3개 항목 × 2턴)
         if response.content.count("✅") >= 6:
+            # 대화 내역에서 반성 정보 추출
+            info = extract_reflection_info_from_conversation(state)
+
+            # ReflectionCriteria 도구 호출을 위한 AIMessage 생성
+            llm = ChatOpenAI(model=BASE_LLM_MODEL, temperature=0)
+            llm_with_tools = llm.bind_tools([ReflectionCriteria])
+            sys = SystemMessage(content=f"""사용자가 반성 단계를 완료했습니다. 다음 정보를 ReflectionCriteria로 제출하세요:
+목표 달성 여부: {info.get('goal_achievement','정보 없음')}
+좋은 프롬프트: {info.get('best_prompt','정보 없음')}
+새로 배운 것: {info.get('new_learning','정보 없음')}""")
+            tool_call_msg = llm_with_tools.invoke([sys] + state.get("messages", [])[-5:])
+
             return {
-                "messages": [
-                    response, 
-                    AIMessage(content=(
-                        "✅✅ 목표 달성 | ✅✅ 좋은 프롬프트 | ✅✅ 새로 배운 것\n\n"
-                        "다음 중 선택해주세요:\n- '완료'\n- '반성 확인'\n- '반성 수정'"
-                    ))
-                ],
-                "awaiting_reflection_confirmation": True,
-                "awaiting_reflection_start_choice": False,
+                "messages": [response, tool_call_msg],
                 "phase": "reflection",
-                "waiting_for_input": True
+                "waiting_for_input": False,
+                "awaiting_reflection_start_choice": False,
             }
 
     return {
@@ -1339,61 +1340,6 @@ JSON으로만 반환:
         return json.loads(resp)
     except Exception:
         return {}
-
-def reflection_complete_confirmation(state: LearningAgentState):
-    messages = state["messages"]
-    last = next((m.content.lower().strip() for m in reversed(messages) if isinstance(m, HumanMessage)), "")
-    complete_k = ["완료", "반성 완료", "다음 단계", "진행"]
-    confirm_k  = ["반성 확인", "정보 확인", "확인", "정리", "보여줘"]
-    reset_k    = ["반성 수정", "다시", "초기화", "처음부터", "재시작"]
-
-    if any(k in last for k in complete_k):
-        llm = ChatOpenAI(model=BASE_LLM_MODEL, temperature=0)
-        llm_with_tools = llm.bind_tools([ReflectionCriteria])
-        info = extract_reflection_info_from_conversation(state)
-        sys = SystemMessage(content=f"""사용자가 반성 단계를 완료했습니다. 다음 정보를 ReflectionCriteria로 제출하세요:
-목표 달성 여부: {info.get('goal_achievement','정보 없음')}
-좋은 프롬프트: {info.get('best_prompt','정보 없음')}
-새로 배운 것: {info.get('new_learning','정보 없음')}""")
-        response = llm_with_tools.invoke([sys] + messages[-5:])
-        return {
-            "messages": [response],
-            "awaiting_reflection_confirmation": False,
-            "phase": "reflection"
-        }
-
-    if any(k in last for k in confirm_k):
-        info = extract_reflection_info_from_conversation(state)
-        text = (
-            "📋 수집된 반성 정보\n\n"
-            f"🎯 목표 달성 여부:\n{info.get('goal_achievement','N/A')}\n\n"
-            f"👍 좋은 프롬프트:\n{info.get('best_prompt','N/A')}\n\n"
-            f"💡 새롭게 배운 것:\n{info.get('new_learning','N/A')}\n\n"
-            "- '완료'를 입력하면 마무리합니다\n- '반성 수정'을 입력하면 다시 시작합니다"
-        )
-        return {
-            "messages": [AIMessage(content=text)],
-            "awaiting_reflection_confirmation": True,
-            "phase": "reflection",
-            "waiting_for_input": True
-        }
-
-    if any(k in last for k in reset_k):
-        ask = "반성을 처음부터 다시 시작하시겠어요?\n- '예' 또는 '확인': 다시 시작\n- '아니오' 또는 '취소': 유지"
-        return {
-            "messages": [AIMessage(content=ask)],
-            "awaiting_reflection_confirmation": True,
-            "phase": "reflection",
-            "waiting_for_input": True
-        }
-
-    return {
-        "messages": [AIMessage(content="선택을 이해하지 못했어요. '완료' / '반성 확인' / '반성 수정' 중에서 선택해주세요.")],
-        "awaiting_reflection_confirmation": True,
-        "phase": "reflection",
-        "waiting_for_input": True
-    }
-
 
 def finalize_reflection(state: LearningAgentState):
     """반성 단계 완료 처리"""
@@ -1477,7 +1423,7 @@ def generate_summary(state: LearningAgentState):
         plan_display = plan
     
     summary_prompt = f"""
-학습 과정 요약:
+**학습 과정 요약**:
 
 【계획 단계】
 - 📊 데이터 설명: {planning_info.get('dataset_description', 'N/A')}
@@ -1499,7 +1445,7 @@ def generate_summary(state: LearningAgentState):
 # Routing Functions
 # ============================================================
 
-def route_initial(state) -> Literal["planning", "execution", "reflection", "summarize_execution", "finalize_planning",  "planning_complete_confirmation", "reflection_complete_confirmation"]:
+def route_initial(state) -> Literal["planning", "execution", "reflection", "summarize_execution", "finalize_planning",  "planning_complete_confirmation"]:
     """초기 라우팅 - 현재 phase에 따라 적절한 노드로"""
     phase = state.get("phase", "planning")
     
@@ -1555,11 +1501,6 @@ def route_initial(state) -> Literal["planning", "execution", "reflection", "summ
         # 마지막 메시지가 HumanMessage인지 확인 (사용자가 입력했는지)
         if messages and isinstance(messages[-1], HumanMessage):
             return "planning_complete_confirmation"
-
-    # route_initial에 확인 플래그 처리(추가)
-    if state.get("awaiting_reflection_confirmation", False):
-        if messages and isinstance(messages[-1], HumanMessage):
-            return "reflection_complete_confirmation"
 
     # route_initial에 자연어 요약 의도 감지 추가
     if phase == "reflection" and messages:
@@ -1674,8 +1615,6 @@ def route_from_reflection(state) -> Literal["finalize_reflection"]:
 
     if isinstance(last_message, AIMessage) and getattr(last_message, "tool_calls", None):
         return "finalize_reflection"
-    if state.get("awaiting_reflection_confirmation", False):
-        return "reflection_complete_confirmation"
     return END
 
 # ============================================================
@@ -1695,7 +1634,6 @@ def create_learning_agent_graph():
     workflow.add_node("execution", execution_node)
     workflow.add_node("summarize_execution", summarize_execution)
     workflow.add_node("reflection", reflection_node)
-    workflow.add_node("reflection_complete_confirmation", reflection_complete_confirmation)
     workflow.add_node("finalize_reflection", finalize_reflection)
     workflow.add_node("generate_summary", generate_summary)
     
@@ -1739,16 +1677,6 @@ def create_learning_agent_graph():
     workflow.add_conditional_edges(
         "reflection",
         route_from_reflection,
-        {
-            "finalize_reflection": "finalize_reflection",
-            "reflection_complete_confirmation": "reflection_complete_confirmation",
-            END: END
-        }
-    )
-
-    workflow.add_conditional_edges(
-        "reflection_complete_confirmation",
-        lambda s: "finalize_reflection" if (isinstance(s["messages"][-1], AIMessage) and getattr(s["messages"][-1], "tool_calls", None)) else END,
         {
             "finalize_reflection": "finalize_reflection",
             END: END
@@ -1907,6 +1835,48 @@ class LearningAgentRunner:
             as_node="execution"
         )
     
+    def setup_test_execution_stage(self):
+        """Stage 2 테스트를 위한 (Stage 1 완료 상태) 더미 state 설정"""
+        # 더미 메시지 및 state 생성 - Stage 1이 끝난 직후라고 가정
+        dummy_messages = [
+            SystemMessage(content="시스템 시작"),
+            AIMessage(content="안녕하세요! 학습을 시작해볼까요?"),
+            HumanMessage(content="네, 시작할게요"),
+        ]
+        
+        dummy_state = {
+            "messages": dummy_messages,
+            "phase": "execution",
+            "planning_completed": True,
+            "execution_completed": False,
+            "reflection_completed": False,
+            "waiting_for_input": True,
+            "summary_generated": False,
+            "awaiting_planning_confirmation": False,
+            "planning_info": {
+                "dataset_description": "테스트 데이터셋 - Iris 품종별 꽃잎 특징 데이터",
+                "data_analysis_objective": "품종별 꽃잎 길이와 너비의 차이를 시각화하고 분석하기",
+                "data_analysis_plan": "산점도와 박스플롯을 활용하여 품종별 특징 비교"
+            },
+            # Stage 2에서 사용할 더미 시스템 프롬프트
+            "generated_prompt": (
+                "이것은 Stage 2 실행 단계를 바로 테스트하기 위한 더미 시스템 프롬프트입니다.\n"
+                "실제 학습에서는 Stage 1 계획 단계에서 생성된 프롬프트가 여기에 들어갑니다."
+            ),
+            "reflection_info": None,
+            # planning 단계 메시지는 dummy_messages 전체라고 가정 (0~2 인덱스)
+            "phase_end_indices": {
+                "planning": len(dummy_messages) - 1
+            },
+            "execution_intent_history": [],
+            "execution_assessment_history": []
+        }
+        
+        # State 업데이트
+        self.graph.update_state(self.config, dummy_state, as_node="__start__")
+        
+        return self.get_state()
+    
     def setup_test_reflection_stage(self):
         """Stage 3 테스트를 위한 더미 state 설정"""
         # 더미 메시지 및 state 생성
@@ -1925,7 +1895,6 @@ class LearningAgentRunner:
             "waiting_for_input": True,
             "summary_generated": True,
             "awaiting_planning_confirmation": False,
-            "awaiting_reflection_confirmation": False,
             "planning_info": {
                 "dataset_description": "테스트 데이터셋 - Iris 품종별 꽃잎 특징 데이터",
                 "data_analysis_objective": "품종별 꽃잎 길이와 너비의 차이를 시각화하고 분석하기",

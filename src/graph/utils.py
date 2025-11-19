@@ -1,5 +1,26 @@
 from typing import Optional, Dict
 
+
+def get_thread_specific_key(base_key: str, thread_id: str = None) -> str:
+    """
+    스레드 ID를 기반으로 session_state 키를 생성합니다.
+    
+    Args:
+        base_key: 기본 키 이름
+        thread_id: 스레드 ID (None이면 session_state에서 가져옴)
+    
+    Returns:
+        스레드별 키 (예: "sidebar_generated_prompt_thread123")
+    """
+    import streamlit as st
+    
+    if thread_id is None:
+        thread_id = st.session_state.get("learning_thread_id", "")
+    
+    suffix = f"_{thread_id}" if thread_id else ""
+    return f"{base_key}{suffix}"
+
+
 def get_phase_messages(messages: list, phase: str, phase_end_indices: Optional[Dict[str, int]]) -> list:
     """
     특정 단계의 메시지만 필터링하여 반환

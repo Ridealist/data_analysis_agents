@@ -10,10 +10,12 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.graph.learning_agent import LearningAgentRunner
+from src.graph.learning_agent import LearningAgentRunner, generate_summary
 from src.graph.sidebars import render_learning_sidebar
 from src.graph.utils import get_phase_messages
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage, SystemMessage
+
+URL_PROF_IMAGE = "./data/teacher.png"
 
 
 def render_message(msg, reflection_info=None):
@@ -22,16 +24,17 @@ def render_message(msg, reflection_info=None):
         st.chat_message("user").write(msg.content)
     elif isinstance(msg, AIMessage):
         if msg.tool_calls:
+            pass
             # Tool call 정보 표시 - reflection_info 사용
-            with st.chat_message("assistant"):
-                st.write("✅ 반성 정보가 수집되었습니다!")
-                if reflection_info:
-                    with st.expander("수집된 반성 내용 보기"):
-                        st.json(reflection_info)
+            # with st.chat_message("assistant"):
+            #     st.write("✅ 반성 정보가 수집되었습니다!")
+            #     if reflection_info:
+            #         with st.expander("수집된 반성 내용 보기"):
+            #             st.json(reflection_info)
         else:
-            st.chat_message("assistant").write(msg.content)
+            st.chat_message("assistant", avatar=URL_PROF_IMAGE).write(msg.content)
     elif isinstance(msg, ToolMessage):
-        st.chat_message("assistant").write(msg.content)
+        st.chat_message("assistant", avatar=URL_PROF_IMAGE).write(msg.content)
     elif isinstance(msg, SystemMessage):
         # SystemMessage는 표시하지 않음
         pass
@@ -116,7 +119,7 @@ def main():
         st.header("💬 대화")
 
         # 안내 메시지(항상 고정으로 맨 위에 표시)
-        with st.chat_message("assistant"):
+        with st.chat_message("assistant", avatar=URL_PROF_IMAGE):
             st.markdown("🪞 Stage 3를 시작해요. 아래 중 하나를 선택해주세요: \n\n 1. 반성 진행 \n 2. 실행 단계 대화 요약 \n\n 원하는 선택을 '반성' 또는 '요약'으로 답해주세요.")
         
         # 반성 단계 메시지 표시
@@ -151,22 +154,21 @@ def main():
         if reflection_completed or current_phase == "complete":
             st.success("🎉 모든 학습 과정이 완료되었습니다!")
 
-            # 다운로드 옵션
             st.divider()
 
-            import json
-            summary_data = {
-                "planning": state.get("planning_info"),
-                "reflection": state.get("reflection_info")
-            }
-            summary_json = json.dumps(summary_data, ensure_ascii=False, indent=2)
+            # 최종 마무리 멘트 + 전체 학습 요약 출력
+            summary_text = None
+            try:
+                summary_result = generate_summary(state)
+                messages = summary_result.get("messages", [])
+                if messages and isinstance(messages[0], AIMessage):
+                    summary_text = messages[0].content
+            except Exception:
+                summary_text = None
 
-            st.download_button(
-                label="📥 학습 요약 다운로드 (JSON)",
-                data=summary_json,
-                file_name="learning_summary.json",
-                mime="application/json"
-            )
+            with st.chat_message("assistant", avatar=URL_PROF_IMAGE):
+                if summary_text:
+                    st.markdown(summary_text)
 
             if st.button("🆕 새로운 학습 시작하기", type="primary"):
                 agent.reset()

@@ -4,9 +4,11 @@ Learning Agent 사이드바 공통 모듈
 
 import streamlit as st
 from src.graph.learning_agent import LearningAgentRunner
-from src.graph.utils import get_phase_messages
+from src.graph.utils import get_phase_messages, get_thread_specific_key
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage, SystemMessage
 from src.components.dataclass import MessageRole, MessageType
+
+URL_PROF_IMAGE = "./data/teacher.png"
 
 # ============================================================
 # Helper Functions
@@ -30,7 +32,7 @@ def extract_csv_text_conversation() -> str:
 
 def render_thread_manager(agent: LearningAgentRunner):
     """스레드 관리 UI (사이드바용)"""
-    
+
     st.divider()
 
     st.header("📚 학습 세션 관리")
@@ -124,13 +126,12 @@ def render_execution_sidebar_chat(agent: LearningAgentRunner, state):
     
     with chat_container:
         if execution_messages:
-            # 학습 AI 에이전트의 조언(AIMessage, ToolMessage)만 표시
-            # 사용자 발화(HumanMessage)는 메인 화면에서 이미 보이므로 제외
+            # 실행 단계 전체 대화 표시 (사용자 + 학습 AI 에이전트)
             for msg in execution_messages:
-                if isinstance(msg, AIMessage):
-                    st.chat_message("assistant").write(msg.content)
-                elif isinstance(msg, ToolMessage):
-                    st.chat_message("assistant").write(msg.content)
+                if isinstance(msg, HumanMessage):
+                    st.chat_message("user").write(msg.content)
+                elif isinstance(msg, (AIMessage, ToolMessage)):
+                    st.chat_message("assistant", avatar=URL_PROF_IMAGE).write(msg.content)
         else:
             # 메시지가 없을 때 안내
             st.info("💬 메인 화면에서 데이터 분석 질문을 하면, 학습 AI 에이전트의 조언이 여기에 표시됩니다.")
@@ -142,7 +143,7 @@ def render_execution_sidebar_chat(agent: LearningAgentRunner, state):
                 or st.session_state["learning_stream_placeholder"] is None
             ):
                 st.session_state["learning_stream_placeholder"] = st.empty()
-        
+    
     # 완료 상태 확인 및 안내 / 버튼
     if execution_completed:
         st.success("✅ 실행 단계가 완료되었습니다!")
@@ -164,159 +165,176 @@ def render_execution_sidebar_chat(agent: LearningAgentRunner, state):
             st.rerun()
 
 
+# ============================================================
+# Stage별 사이드바 렌더링 함수
+# ============================================================
+
+def _sync_generated_prompt_to_session(state: dict) -> None:
+    """
+    LangGraph state의 generated_prompt를 session_state로 동기화 (변경 시에만).
+    스레드별로 독립적인 키를 사용하여 멀티 스레드 환경을 지원합니다.
+    """
+    latest = state.get("generated_prompt")
+    if not latest:
+        return
+
+    # 스레드별 키 생성
+    edit_key = get_thread_specific_key("sidebar_generated_prompt")
+    last_key = get_thread_specific_key("_last_generated_prompt")
+
+    # 새로 생성되었거나 변경된 경우에만 덮어쓰기
+    if st.session_state.get(last_key) != latest:
+        st.session_state[edit_key] = latest
+        st.session_state[last_key] = latest
+
+
+def render_stage1_sidebar(agent: LearningAgentRunner, state: dict) -> None:
+    """Stage 1 (Planning) 사이드바 - 시스템 프롬프트 표시/수정/저장."""
+    st.header("🏷️ 생성된 시스템 프롬프트")
+
+    generated_prompt = state.get("generated_prompt")
+    
+    # 스레드별 키 생성
+    thread_id = st.session_state.get("learning_thread_id", "")
+    original_key = get_thread_specific_key("original_generated_prompt", thread_id)
+    edit_key = get_thread_specific_key("sidebar_generated_prompt", thread_id)
+
+    # 원본 프롬프트 보관 (스레드별로 최초 한 번만 저장)
+    if generated_prompt and original_key not in st.session_state:
+        st.session_state[original_key] = generated_prompt
+
+    if generated_prompt:
+        _sync_generated_prompt_to_session(state)  # 스레드별 키로 동기화
+        is_disabled = False
+        caption_text = "💡 이 프롬프트를 수정한 후 아래 '저장' 버튼을 눌러주세요."
+    else:
+        is_disabled = True
+        caption_text = "💡 계획을 완료하고 '완료' 키워드를 입력해주세요."
+
+    edited_prompt = st.text_area(
+        "데이터 분석을 위한 시스템 프롬프트",
+        placeholder="(계획 단계를 완료하면 생성된 프롬프트가 나타납니다.)",
+        height=400,
+        disabled=is_disabled,
+        key=edit_key,  # 스레드별 키 사용
+        label_visibility="collapsed",
+    )
+
+    st.caption(caption_text)
+
+    if generated_prompt:
+        col1, col2 = st.columns([1, 1])
+
+        with col1:
+            save_button = st.button(
+                "💾 프롬프트 저장",
+                type="primary",
+                use_container_width=True,
+                key=f"save_prompt_button_{thread_id}",  # 스레드별 버튼 키
+                help="수정한 프롬프트를 저장하고 Stage 2에서 사용합니다",
+            )
+
+        with col2:
+            reset_button = st.button(
+                "🔄 원본으로 복원",
+                use_container_width=True,
+                key=f"reset_prompt_button_{thread_id}",  # 스레드별 버튼 키
+                help="AI가 생성한 원본 프롬프트로 되돌립니다",
+            )
+
+        # 저장 버튼 클릭 시
+        if save_button:
+            if edited_prompt.strip():
+                try:
+                    agent.graph.update_state(
+                        agent.config,
+                        {"generated_prompt": edited_prompt},
+                        as_node="finalize_planning",
+                    )
+
+                    st.success("✅ 프롬프트가 저장되었습니다!")
+                    st.info("💡 Stage 2에서 수정된 프롬프트가 사용됩니다.")
+                except Exception as e:
+                    st.error(f"❌ 프롬프트 저장 실패: {e}")
+            else:
+                st.warning("⚠️ 프롬프트가 비어있습니다. 내용을 입력해주세요.")
+
+        # 원본 복원 버튼 클릭 시
+        if reset_button:
+            original = st.session_state.get(original_key)
+            if original:
+                try:
+                    agent.graph.update_state(
+                        agent.config,
+                        {"generated_prompt": original},
+                        as_node="finalize_planning",
+                    )
+                    st.success("✅ 원본 프롬프트로 복원되었습니다!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ 프롬프트 복원 실패: {e}")
+            else:
+                st.warning("⚠️ 원본 프롬프트를 찾을 수 없습니다.")
+
+
+def render_stage2_sidebar(agent: LearningAgentRunner, state: dict) -> None:
+    """Stage 2 (Execution) 사이드바 - 기존 실행 단계 대화 인터페이스 재사용."""
+    render_execution_sidebar_chat(agent, state)
+
+
+def render_stage3_sidebar(agent: LearningAgentRunner, state: dict) -> None:
+    """Stage 3 (Reflection) 사이드바 - 실행 단계 대화 요약 표시."""
+    st.header("📊 실행 단계 대화 요약")
+
+    execution_summary = state.get("execution_summary", "")
+    placeholder_text = "('요약' 키워드를 입력하면 Stage 2에서 데이터 분석하면서 진행한 대화 요약본이 생성됩니다.)"
+
+    # 요약이 있으면 내용 표시, 없으면 placeholder 표시
+    display_value = execution_summary if execution_summary else placeholder_text
+
+    st.text_area(
+        "Stage 2에서 진행된 대화 내용",
+        value=display_value,
+        height=400,
+        disabled=True,  # 항상 비활성화 (수정 불가)
+        key="sidebar_execution_summary",
+        label_visibility="collapsed",
+    )
+
+    # 요약이 있을 때만 안내 캡션 표시
+    if execution_summary:
+        st.caption("💡 이 요약은 실행 단계의 대화를 바탕으로 생성되었습니다.")
+    else:
+        st.caption("💡 메인 화면에서 '요약' 키워드를 입력하여 요약을 생성하세요.")
+
+
+# ============================================================
+# 메인 사이드바 디스패처
+# ============================================================
+
 def render_learning_sidebar(agent: LearningAgentRunner, current_page: str = None):
     """
-    Learning Agent 사이드바 렌더링 (모든 페이지 공통)
+    Learning Agent 사이드바 렌더링 메인 함수
     
     Args:
         agent: LearningAgentRunner 인스턴스
         current_page: 현재 페이지 ("stage1", "stage2", "stage3" 또는 None)
-                      stage2일 때만 사이드바에 대화 인터페이스 표시
-    
-    current_page에 따라 다른 UI를 표시:
-    - stage2: 사이드바에 대화 인터페이스 표시
-    - stage1, stage3, None: 기존처럼 프롬프트 표시
     """
-    
+
     with st.sidebar:
         state = agent.get_state()
-        
-        # Stage 2 (Execution) 페이지일 때만: 사이드바에 대화 인터페이스
+
+        if not state:
+            st.warning("⚠️ State를 불러올 수 없습니다.")
+            render_thread_manager(agent)
+            return
+
         if current_page == "stage2":
-            render_execution_sidebar_chat(agent, state)
-        # Stage 3 (Reflection) 페이지일 때: 실행 단계 대화 요약 표시
+            render_stage2_sidebar(agent, state)
         elif current_page == "stage3":
-            st.header("📊 실행 단계 대화 요약")
-            
-            # 요약 내용 가져오기 (없으면 빈 문자열)
-            execution_summary = ""
-            placeholder_text = "('요약' 키워드를 입력하면 Stage 2에서 데이터 분석하면서 진행한 대화 요약본이 생성됩니다.)"
-            
-            if state:
-                execution_summary = state.get("execution_summary", "")
-            
-            # 요약이 있으면 내용 표시, 없으면 placeholder 표시
-            display_value = execution_summary if execution_summary else placeholder_text
-            
-            st.text_area(
-                "Stage 2에서 진행된 대화 내용",
-                value=display_value,
-                height=400,
-                disabled=True,  # 항상 비활성화 (수정 불가)
-                key="sidebar_execution_summary",
-                label_visibility="collapsed"
-            )
-            
-            # 요약이 있을 때만 안내 캡션 표시
-            if execution_summary:
-                st.caption("💡 이 요약은 실행 단계의 대화를 바탕으로 생성되었습니다.")
-            else:
-                st.caption("💡 메인 화면에서 '요약' 키워드를 입력하여 요약을 생성하세요.")
-        else:
-            # 기존 로직: 생성된 시스템 프롬프트 표시
-            if state:
-                generated_prompt = state.get("generated_prompt")
-                
-                # 항상 헤더와 박스 표시
-                st.header("🏷️ 생성된 시스템 프롬프트")
-                
-                # 프롬프트가 있으면 내용 표시, 없으면 placeholder 표시
-                if generated_prompt:
-                    # 원본 프롬프트 보관 (최초 한 번만 저장)
-                    if "original_generated_prompt" not in st.session_state:
-                        st.session_state["original_generated_prompt"] = generated_prompt
-                    
-                    # 🔧 수정: 프롬프트가 새로 생성되었거나 변경된 경우 강제 동기화
-                    # LangGraph state의 값과 session_state가 다르면 LangGraph 값으로 업데이트
-                    current_session_prompt = st.session_state.get("sidebar_generated_prompt")
-                    
-                    # 프롬프트가 처음 생성되었거나, reset 요청이 있는 경우
-                    if "_force_reset_prompt" in st.session_state:
-                        st.session_state["sidebar_generated_prompt"] = st.session_state["_force_reset_prompt"]
-                        del st.session_state["_force_reset_prompt"]
-                    elif current_session_prompt is None:
-                        # 처음 생성된 경우
-                        st.session_state["sidebar_generated_prompt"] = generated_prompt
-                    
-                    prompt_value = st.session_state.get("sidebar_generated_prompt", generated_prompt)
-                    caption_text = "💡 이 프롬프트를 수정한 후 아래 '저장' 버튼을 눌러주세요."
-                    is_disabled = False
-                else:
-                    prompt_value = "(계획 단계를 완료하면 생성된 프롬프트가 나타납니다.)"
-                    caption_text = "💡 계획을 완료하고 '완료' 키워드를 입력해주세요."
-                    is_disabled = True
-                
-                # 텍스트 영역 렌더링 (편집 가능)
-                # key를 "sidebar_generated_prompt"로 통일하여 상태 동기화
-                edited_prompt = st.text_area(
-                    "데이터 분석을 위한 시스템 프롬프트",
-                    value=prompt_value,
-                    height=400,
-                    disabled=is_disabled,  # 프롬프트가 없으면 편집 불가
-                    key="sidebar_generated_prompt",  # 키를 통일
-                    label_visibility="collapsed"
-                )
-                
-                st.caption(caption_text)
-                
-                # 프롬프트가 있을 때만 저장 버튼 표시
-                if generated_prompt:
-                    col1, col2 = st.columns([1, 1])
-                    
-                    with col1:
-                        save_button = st.button(
-                            "💾 프롬프트 저장",
-                            type="primary",
-                            use_container_width=True,
-                            key="save_prompt_button",
-                            help="수정한 프롬프트를 저장하고 Stage 2에서 사용합니다"
-                        )
-                    
-                    with col2:
-                        reset_button = st.button(
-                            "🔄 원본으로 복원",
-                            use_container_width=True,
-                            key="reset_prompt_button",
-                            help="AI가 생성한 원본 프롬프트로 되돌립니다"
-                        )
-                    
-                    # 저장 버튼 클릭 시
-                    if save_button:
-                        if edited_prompt.strip():
-                            try:
-                                # LangGraph state 업데이트 (session_state는 text_area가 자동 관리)
-                                agent.graph.update_state(
-                                    agent.config,
-                                    {"generated_prompt": edited_prompt},
-                                    as_node="finalize_planning"
-                                )
-                                
-                                st.success("✅ 프롬프트가 저장되었습니다!")
-                                st.info("💡 Stage 2에서 수정된 프롬프트가 사용됩니다.")
-                            except Exception as e:
-                                st.error(f"❌ 프롬프트 저장 실패: {e}")
-                        else:
-                            st.warning("⚠️ 프롬프트가 비어있습니다. 내용을 입력해주세요.")
-                    
-                    # 🔧 수정: 원본 복원 버튼 - 직접 수정 대신 rerun으로 처리
-                    if reset_button:
-                        # 원본 프롬프트 가져오기
-                        original_prompt = st.session_state.get("original_generated_prompt", generated_prompt)
-                        
-                        # 🔧 직접 수정하지 않고, 임시 플래그를 설정한 후 rerun
-                        st.session_state["_force_reset_prompt"] = original_prompt
-                        
-                        # LangGraph state도 원본으로 복원
-                        try:
-                            agent.graph.update_state(
-                                agent.config,
-                                {"generated_prompt": original_prompt},
-                                as_node="finalize_planning"
-                            )
-                            st.success("🔄 원본 프롬프트로 복원되었습니다!")
-                            st.rerun()  # 화면 갱신
-                        except Exception as e:
-                            st.error(f"❌ 복원 실패: {e}")
-        
+            render_stage3_sidebar(agent, state)
+        else:  # stage1 또는 None
+            render_stage1_sidebar(agent, state)
+
         # 세션 관리 UI (항상 표시)
         render_thread_manager(agent)

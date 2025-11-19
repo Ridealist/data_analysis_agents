@@ -30,7 +30,7 @@ sys.path.insert(0, str(project_root))
 
 from src.graph.learning_agent import LearningAgentRunner
 from src.graph.sidebars import render_learning_sidebar
-from src.graph.utils import get_phase_messages
+from src.graph.utils import get_phase_messages, get_thread_specific_key
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from src.components.dynamo import (
@@ -69,6 +69,8 @@ AWS_REGION = st.secrets.get("AWS_REGION", "ap-northeast-2")
 CONVERSATIONS_ANALYSIS_TABLE = "chatbot_conversations_dataanalysis"
 MESSAGES_ANALYSIS_TABLE = "chatbot_messages_dataanalysis"
 AGENCY_ANALYSIS_TABLE = "agency_messages_dataanalysis"
+
+URL_PROF_IMAGE = "./data/teacher.png"
 
 # ============================================================
 # 매니저 초기화
@@ -133,7 +135,7 @@ if "conversation_id" not in st.session_state:
     st.session_state["conversation_id"] = None
 
 if "model_option_general" not in st.session_state:
-    st.session_state["model_option_general"] = "gpt-4.1-mini"
+    st.session_state["model_option_general"] = "gpt-4.1"
 
 if "openai_api_key" not in st.session_state:
     st.session_state["openai_api_key"] = None
@@ -434,6 +436,9 @@ def thread_safe_learning_tutor(
     사이드바 튜터 조언을 sidebar_queue로 전달
     """
     try:
+        # 먼저 사용자 발화를 사이드바 큐에 전달
+        sidebar_queue.put(("USER_TEXT", query))
+
         # LearningAgent에 메시지 전송 (state 업데이트)
         learning_agent.send_message(query)
 
@@ -656,14 +661,19 @@ def update_ui_from_queues(
                     sidebar_done = True
                 else:
                     msg_type, content = item
-                    if msg_type == "TEXT":
-                        sidebar_text_buffer += content
-                        placeholder = st.session_state.get("learning_stream_placeholder")
-                        if placeholder is not None:
-                            with placeholder.container():
-                                st.chat_message("assistant").markdown(
-                                    sidebar_text_buffer
-                                )
+                    placeholder = st.session_state.get("learning_stream_placeholder")
+                    if placeholder is not None:
+                        with placeholder.container():
+                            if msg_type == "USER_TEXT":
+                                # 사용자의 입력도 사이드바 대화에 표시
+                                st.chat_message("user").markdown(content)
+                            elif msg_type == "TEXT":
+                                # 튜터(학습 AI 에이전트)의 조언 스트리밍
+                                sidebar_text_buffer += content
+                                st.chat_message(
+                                    "assistant",
+                                    avatar=URL_PROF_IMAGE,
+                                ).markdown(sidebar_text_buffer)
 
             except Empty:
                 pass
@@ -680,16 +690,14 @@ def get_combined_prefix_prompt(learning_agent: LearningAgentRunner) -> str:
     Stage 1에서 생성된 프롬프트와 기본 prefix 프롬프트를 결합합니다.
 
     우선순위:
-    1) 사용자가 Stage1 사이드바에서 수정한 프롬프트 (스레드별 sidebar_generated_prompt_{thread_id})
+    1) 사용자가 Stage1 사이드바에서 수정한 프롬프트 (스레드별)
     2) LearningAgent state에 저장된 generated_prompt
     3) 기본 AGENT_PREFIX_PROMPT
     """
-    # 현재 스레드 ID 기반으로 key 분리
-    thread_id = st.session_state.get("learning_thread_id", "")
-    suffix = f"_{thread_id}" if thread_id else ""
-    edit_key = f"sidebar_generated_prompt{suffix}"
+    # 스레드별 키 생성 (공통 헬퍼 사용)
+    edit_key = get_thread_specific_key("sidebar_generated_prompt")
 
-    # 1) Stage1 사이드바에서 수정된 프롬프트 (스레드별 key)
+    # 1) Stage1 사이드바에서 수정된 프롬프트 (스레드별)
     edited_prompt = (st.session_state.get(edit_key) or "").strip()
 
     # 2) LangGraph 상태에 저장된 자동 생성 프롬프트
@@ -762,7 +770,7 @@ def render_csv_agent_execution_ui(learning_agent: LearningAgentRunner):
             label="🧠 모델 선택지",
             options=["gpt-4o-mini", "gpt-4.1-mini", "gpt-4o", "gpt-4.1"],
             index=["gpt-4o-mini", "gpt-4.1-mini", "gpt-4o", "gpt-4.1"].index(
-                st.session_state.get("model_option_general", "gpt-4.1-mini")
+                st.session_state.get("model_option_general", "gpt-4.1")
             ),
             help="데이터 분석을 위한 OpenAI 모델을 설정합니다.",
         )
@@ -1014,9 +1022,6 @@ def main():
     # Runner 초기화
     agent = LearningAgentRunner()
     
-    # 사이드바: LangGraph 구조 유지
-    render_learning_sidebar(agent, current_page="stage2")
-    
     # 메인 영역
     state = agent.get_state()
     
@@ -1030,10 +1035,8 @@ def main():
         planning_info = state.get("planning_info")
 
         # Stage 1에서 완성된 시스템 프롬프트 표시 (사용자 수정본 우선, 없으면 자동 생성본)
-        # 스레드별 sidebar_generated_prompt_{thread_id} 사용
         thread_id = st.session_state.get("learning_thread_id", "")
-        suffix = f"_{thread_id}" if thread_id else ""
-        edit_key = f"sidebar_generated_prompt{suffix}"
+        edit_key = get_thread_specific_key("sidebar_generated_prompt")
         edited_prompt = (st.session_state.get(edit_key) or "").strip()
         generated_prompt = (state.get("generated_prompt") or "").strip()
         display_prompt = edited_prompt or generated_prompt
@@ -1046,7 +1049,7 @@ def main():
                     height=400,
                     disabled=True,
                     label_visibility="collapsed",
-                    key="stage2_display_system_prompt",
+                    key=f"stage2_display_system_prompt_{thread_id}",  # 스레드별 키
                 )
         else:
             with st.expander("🏷️ Stage 1에서 완성된 시스템 프롬프트", expanded=False):
@@ -1064,10 +1067,12 @@ def main():
             st.info("👈️ 좌측 사이드바에서 'Stage 3: 반성'으로 이동하세요")
         
         st.divider()
-        
+
         # ✅ Stage1 완료된 경우에만 CSV_Agent 메인 UI 활성화
         render_csv_agent_execution_ui(agent)
 
+    # 🔁 메인 영역에서 LearningAgent state 가 업데이트된 뒤에 사이드바 렌더
+    render_learning_sidebar(agent, current_page="stage2")
 
 if __name__ == "__main__":
     main()
