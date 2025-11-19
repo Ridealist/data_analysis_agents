@@ -138,20 +138,11 @@ def main():
             # 사용자 입력
             st.subheader("메시지 입력")
             
-            # 예제 응답
-            with st.expander("💡 예제 응답 보기"):
-                st.write("**데이터 설명 예시:**")
-                st.write("- iris 데이터는 꽃잎의 길이와 너비, 꽃받침의 길이와 너비, 그리고 품종 정보를 담고 있어요")
-                st.write("- 온라인 쇼핑몰의 고객 구매 데이터입니다. 나이, 성별, 구매 금액 등이 있어요")
-                
-                st.write("\n**분석 목표 예시:**")
-                st.write("- 품종별로 꽃잎의 특징이 어떻게 다른지 알아보고 싶어요")
-                st.write("- 어떤 연령대가 가장 많이 구매하는지 파악하고 싶어요")
-            
-            user_input = st.text_input(
+            user_input = st.text_area(
                 "메시지를 입력하세요:",
                 key="planning_input",
-                placeholder="튜터의 질문에 답해주세요..."
+                placeholder="튜터의 질문에 답해주세요...",
+                height=80
             )
             
             col1, col2 = st.columns([1, 4])

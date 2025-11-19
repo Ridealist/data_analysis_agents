@@ -680,12 +680,17 @@ def get_combined_prefix_prompt(learning_agent: LearningAgentRunner) -> str:
     Stage 1에서 생성된 프롬프트와 기본 prefix 프롬프트를 결합합니다.
 
     우선순위:
-    1) 사용자가 Stage1 사이드바에서 수정한 프롬프트 (st.session_state['sidebar_generated_prompt'])
+    1) 사용자가 Stage1 사이드바에서 수정한 프롬프트 (스레드별 sidebar_generated_prompt_{thread_id})
     2) LearningAgent state에 저장된 generated_prompt
     3) 기본 AGENT_PREFIX_PROMPT
     """
-    # 1) Stage1 사이드바에서 수정된 프롬프트
-    edited_prompt = (st.session_state.get("sidebar_generated_prompt") or "").strip()
+    # 현재 스레드 ID 기반으로 key 분리
+    thread_id = st.session_state.get("learning_thread_id", "")
+    suffix = f"_{thread_id}" if thread_id else ""
+    edit_key = f"sidebar_generated_prompt{suffix}"
+
+    # 1) Stage1 사이드바에서 수정된 프롬프트 (스레드별 key)
+    edited_prompt = (st.session_state.get(edit_key) or "").strip()
 
     # 2) LangGraph 상태에 저장된 자동 생성 프롬프트
     state = learning_agent.get_state() if learning_agent is not None else None
@@ -1025,7 +1030,11 @@ def main():
         planning_info = state.get("planning_info")
 
         # Stage 1에서 완성된 시스템 프롬프트 표시 (사용자 수정본 우선, 없으면 자동 생성본)
-        edited_prompt = (st.session_state.get("sidebar_generated_prompt") or "").strip()
+        # 스레드별 sidebar_generated_prompt_{thread_id} 사용
+        thread_id = st.session_state.get("learning_thread_id", "")
+        suffix = f"_{thread_id}" if thread_id else ""
+        edit_key = f"sidebar_generated_prompt{suffix}"
+        edited_prompt = (st.session_state.get(edit_key) or "").strip()
         generated_prompt = (state.get("generated_prompt") or "").strip()
         display_prompt = edited_prompt or generated_prompt
 

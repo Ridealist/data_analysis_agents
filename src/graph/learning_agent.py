@@ -1185,7 +1185,7 @@ def summarize_execution(state: LearningAgentState):
     # CSV 대화가 없으면 요약 불가 안내
     if not conversation_text:
         conversation_text = "실행 단계에서 CSV 데이터 분석 대화 기록이 저장되지 않았습니다."
-        summary = "CSV 데이터 분석 대화가 기록되지 않아 요약을 생성할 수 없습니다."
+        summary = "데이터 분석 대화 기록이 없어, 요약을 생성할 수 없습니다."
     else:
         # 요약 생성
         try:
