@@ -162,6 +162,21 @@ def render_learning_sidebar(agent: LearningAgentRunner, current_page: str = None
         # Stage 2 (Execution) 페이지일 때만: 사이드바에 대화 인터페이스
         if current_page == "stage2":
             render_execution_sidebar_chat(agent, state)
+        # Stage 3 (Reflection) 페이지일 때: 실행 단계 대화 요약 표시
+        elif current_page == "stage3":
+            if state:
+                execution_summary = state.get("execution_summary")
+                if execution_summary:
+                    st.header("📊 실행 단계 대화 요약")
+                    st.text_area(
+                        "Stage 2에서 진행된 대화 내용",
+                        value=execution_summary,
+                        height=400,
+                        disabled=True,
+                        key="sidebar_execution_summary",
+                        label_visibility="collapsed"
+                    )
+                    st.caption("💡 이 요약은 실행 단계의 대화를 바탕으로 생성되었습니다.")
         else:
             # 기존 로직: 생성된 시스템 프롬프트 표시
             if state:
@@ -172,12 +187,11 @@ def render_learning_sidebar(agent: LearningAgentRunner, current_page: str = None
                         "데이터 분석을 위한 시스템 프롬프트",
                         value=generated_prompt,
                         height=400,
-                        disabled=True,
+                        disabled=False,
                         key="sidebar_generated_prompt",
                         label_visibility="collapsed"
                     )
                     st.caption("💡 이 프롬프트는 수집된 정보를 바탕으로 자동 생성되었습니다.")
-                    st.divider()
         
         # 세션 관리 UI (항상 표시)
         render_thread_manager(agent)

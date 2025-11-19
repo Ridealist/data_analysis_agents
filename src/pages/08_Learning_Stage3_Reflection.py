@@ -47,12 +47,11 @@ def main():
     st.title("🪞 Stage 3: 학습 반성 및 정리")
     
     st.markdown("""
-    **Learning Agent - 반성 단계**
+    **Learning AI Agent - 반성 단계**
     
     이번 학습을 돌아보며 성찰해봅시다! 다음 정보를 수집합니다:
     - 🎯 목표 달성 여부
     - 👍 좋은 프롬프트
-    - 👎 개선이 필요한 프롬프트
     - 💡 새롭게 배운 것
     """)
     
@@ -68,6 +67,17 @@ def main():
     if not state or not state.get("execution_completed"):
         st.warning("⚠️ Stage 2: 실행을 먼저 완료하세요")
         st.info("👈 좌측 사이드바에서 'Stage 2: 실행'으로 이동하세요")
+        
+        ##TODO 배포시 삭제: 테스트 모드 추가
+        st.divider()
+        st.subheader("🧪 개발/테스트 모드")
+        st.caption("Stage 1, 2를 건너뛰고 Stage 3을 바로 테스트할 수 있습니다.")
+        
+        if st.button("🚀 Stage 3 테스트 모드로 시작", type="secondary"):
+            with st.spinner("테스트 환경 설정 중..."):
+                agent.setup_test_reflection_stage()
+            st.success("✅ 테스트 환경이 설정되었습니다!")
+            st.rerun()
     else:
         current_phase = state.get("phase", "reflection")
         reflection_completed = state.get("reflection_completed", False)
@@ -76,6 +86,8 @@ def main():
         # 계획 정보 표시 (참조 가능하도록)
         if planning_info:
             with st.expander("📋 나의 학습 계획 (참고용)", expanded=False):
+                plan = planning_info.get('data_analysis_plan', '')
+                plan_display = plan if plan and plan.strip() not in ["", "N/A", "정보 없음", "없음"] else "(구체적인 계획 없이 진행)"
                 st.markdown(f"""
 **데이터 설명:**  
 {planning_info.get('dataset_description', 'N/A')}
@@ -83,8 +95,8 @@ def main():
 **분석 목표:**  
 {planning_info.get('data_analysis_objective', 'N/A')}
 
-**분석 계획:**  
-{planning_info.get('data_analysis_plan', 'N/A')}
+**분석 계획 (선택):**  
+{plan_display}
 """)
         
         st.divider()
@@ -178,10 +190,6 @@ def main():
                 st.write("- '이 데이터에서 어떤 이야기를 찾을 수 있을까요?' - 구체적인 방향을 찾는데 도움이 됐어요")
                 st.write("- '왜 이 결과가 나왔을까요?' - 결과의 의미를 이해하게 됐어요")
                 
-                st.write("\n**나쁜 프롬프트 예시:**")
-                st.write("- '코드 짜줘' - 너무 막연했고 AI에게 전부 의존했어요")
-                st.write("- '이거 어떻게 해?' - 구체적이지 않아서 제대로 된 답을 못 얻었어요")
-                
                 st.write("\n**새롭게 배운 것 예시:**")
                 st.write("- 데이터를 보기 전에 질문을 먼저 정하는 게 중요하다는 걸 알았어요")
                 st.write("- AI에게 '왜'를 물어보면 더 깊이 있는 대화가 가능하다는 것을 배웠어요")
@@ -204,21 +212,6 @@ def main():
                 st.rerun()
             elif send_button:
                 st.warning("메시지를 입력해주세요")
-    
-    # State Inspector (개발자용)
-    with st.expander("🔧 전체 State 보기 (개발자용)"):
-        if state:
-            display_state = {
-                "phase": state.get("phase"),
-                "planning_completed": state.get("planning_completed"),
-                "execution_completed": state.get("execution_completed"),
-                "reflection_completed": state.get("reflection_completed"),
-                "planning_info": state.get("planning_info"),
-                "reflection_info": state.get("reflection_info"),
-                "message_count": len(state.get("messages", []))
-            }
-            st.json(display_state)
-
 
 if __name__ == "__main__":
     main()

@@ -25,7 +25,6 @@ from src.graph.learning_agent import (
 TEST_REFLECTION_DATA = {
     "goal_achievement": "분석 목표를 약 80% 정도 달성했습니다. 품종별 특성 차이는 잘 파악했지만, 시각화 부분은 아직 부족해요.",
     "best_prompt": "품종별로 꽃잎 길이의 평균을 구해주세요. 이때 각 품종별로 그룹화해서 보여주면 좋을 것 같아요.",
-    "worst_prompt": "데이터 분석해줘",
     "new_learning": "AI에게 구체적으로 어떤 분석을 원하는지 명확하게 말해야 더 좋은 결과를 얻을 수 있다는 것을 배웠어요. 또한 그룹화나 집계 함수를 활용하면 더 의미있는 인사이트를 얻을 수 있다는 것도 알게 되었습니다."
 }
 
@@ -54,19 +53,16 @@ TEST_REFLECTION_DATASETS = {
     "Iris 데이터 분석 반성": {
         "goal_achievement": "분석 목표를 약 80% 정도 달성했습니다. 품종별 특성 차이는 잘 파악했지만, 시각화 부분은 아직 부족해요.",
         "best_prompt": "품종별로 꽃잎 길이의 평균을 구해주세요. 이때 각 품종별로 그룹화해서 보여주면 좋을 것 같아요.",
-        "worst_prompt": "데이터 분석해줘",
         "new_learning": "AI에게 구체적으로 어떤 분석을 원하는지 명확하게 말해야 더 좋은 결과를 얻을 수 있다는 것을 배웠어요. 또한 그룹화나 집계 함수를 활용하면 더 의미있는 인사이트를 얻을 수 있다는 것도 알게 되었습니다."
     },
     "온라인 쇼핑몰 데이터 분석 반성": {
         "goal_achievement": "연령대별 구매 패턴은 잘 분석했지만, 시간대별 트렌드 분석은 아직 완료하지 못했어요. 약 70% 정도 달성했습니다.",
         "best_prompt": "20대와 30대의 월별 구매 금액 추이를 비교해주세요. 선 그래프로 보여주면 좋을 것 같아요.",
-        "worst_prompt": "구매 데이터 보여줘",
         "new_learning": "비교 분석을 할 때는 명확한 기준(연령대, 성별 등)을 제시해야 AI가 더 정확한 분석을 해준다는 것을 배웠어요. 또한 시각화 방법을 함께 요청하면 결과를 더 잘 이해할 수 있다는 것도 알게 되었습니다."
     },
     "학교 급식 데이터 분석 반성": {
         "goal_achievement": "영양소 분포와 칼로리는 잘 분석했지만, 계절별 메뉴 패턴 분석은 아직 진행 중이에요. 약 60% 정도 달성했습니다.",
         "best_prompt": "월별로 급식 메뉴의 평균 칼로리를 계산하고, 계절별로 그룹화해서 비교해주세요.",
-        "worst_prompt": "급식 데이터 분석",
         "new_learning": "시간에 따른 변화를 분석할 때는 날짜나 월 정보를 활용해야 한다는 것을 배웠어요. 또한 집계 함수와 그룹화를 함께 사용하면 더 의미있는 분석 결과를 얻을 수 있다는 것도 알게 되었습니다."
     }
 }
@@ -280,7 +276,6 @@ def test_reflection(reflection_data: dict = None,
     print("\n📋 테스트 데이터:")
     print(f"  - 목표 달성 여부: {reflection_data['goal_achievement']}")
     print(f"  - 좋은 프롬프트: {reflection_data['best_prompt']}")
-    print(f"  - 나쁜 프롬프트: {reflection_data['worst_prompt']}")
     print(f"  - 새롭게 배운 것: {reflection_data['new_learning']}")
     
     print("\n⏳ 반성 단계 처리 중...")
@@ -299,7 +294,6 @@ def test_reflection(reflection_data: dict = None,
             print(f"\n💭 수집된 반성 정보:")
             print(f"  - 목표 달성 여부: {reflection_info.get('goal_achievement', 'N/A')}")
             print(f"  - 좋은 프롬프트: {reflection_info.get('best_prompt', 'N/A')}")
-            print(f"  - 나쁜 프롬프트: {reflection_info.get('worst_prompt', 'N/A')}")
             print(f"  - 새롭게 배운 것: {reflection_info.get('new_learning', 'N/A')}")
             
             # 메시지 확인
@@ -331,13 +325,11 @@ def test_with_custom_data():
     
     goal_achievement = input("목표 달성 여부: ").strip() or TEST_REFLECTION_DATA["goal_achievement"]
     best_prompt = input("좋은 프롬프트: ").strip() or TEST_REFLECTION_DATA["best_prompt"]
-    worst_prompt = input("나쁜 프롬프트: ").strip() or TEST_REFLECTION_DATA["worst_prompt"]
     new_learning = input("새롭게 배운 것: ").strip() or TEST_REFLECTION_DATA["new_learning"]
     
     custom_data = {
         "goal_achievement": goal_achievement,
         "best_prompt": best_prompt,
-        "worst_prompt": worst_prompt,
         "new_learning": new_learning
     }
     

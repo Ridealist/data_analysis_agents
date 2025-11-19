@@ -959,7 +959,7 @@ def main():
     st.title("🚀 Stage 2: 데이터 분석 실행")
     
     st.markdown("""
-    **Learning Agent - 실행 단계**
+    **Learning AI Agent - 실행 단계**
     
     이제 계획한 대로 데이터 분석을 실행해봅시다!  
     **좌측 사이드바에서** 튜터와 대화하며 분석을 진행하고, 완료되면 **"완료"** 버튼을 클릭하세요.
@@ -978,8 +978,6 @@ def main():
         st.warning("⚠️ Stage 1: 계획을 먼저 완료하세요")
         st.info("👈 좌측 사이드바에서 'Stage 1: 계획'으로 이동하세요")
         
-        # Stage1 미완료 → CSV_Agent 기능 비활성화
-        st.info("📌 학습 계획(Stage 1)을 완료하면 이 화면에서 CSV 데이터 분석 에이전트를 사용할 수 있습니다.")
     else:
         current_phase = state.get("phase", "planning")
         execution_completed = state.get("execution_completed", False)
@@ -995,8 +993,8 @@ def main():
 **분석 목표:**  
 {planning_info.get('data_analysis_objective', 'N/A')}
 
-**분석 계획:**  
-{planning_info.get('data_analysis_plan', 'N/A')}
+**분석 계획 (선택):**  
+{(planning_info.get('data_analysis_plan') or '') if (planning_info.get('data_analysis_plan') or '').strip() not in ["", "N/A", "정보 없음", "없음"] else "(구체적인 계획 없이 진행)"}
 """)
         
         # 실행 단계 안내
@@ -1016,20 +1014,6 @@ def main():
         
         # ✅ Stage1 완료된 경우에만 CSV_Agent 메인 UI 활성화
         render_csv_agent_execution_ui(agent)
-    
-    # State Inspector (개발자용)
-    with st.expander("🔧 전체 State 보기 (개발자용)"):
-        if state:
-            display_state = {
-                "phase": state.get("phase"),
-                "planning_completed": state.get("planning_completed"),
-                "execution_completed": state.get("execution_completed"),
-                "reflection_completed": state.get("reflection_completed"),
-                "planning_info": state.get("planning_info"),
-                "reflection_info": state.get("reflection_info"),
-                "message_count": len(state.get("messages", []))
-            }
-            st.json(display_state)
 
 
 if __name__ == "__main__":

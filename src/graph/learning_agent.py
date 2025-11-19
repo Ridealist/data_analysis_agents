@@ -75,14 +75,13 @@ class PlanningCriteria(BaseModel):
     """계획 단계에서 수집할 정보"""
     dataset_description: str      # 데이터 설명
     data_analysis_objective: str  # 데이터 분석 목표
-    data_analysis_plan: str       # 데이터 분석 계획
+    data_analysis_plan: Optional[str] = ""  # 데이터 분석 계획 (선택)
 
 
 class ReflectionCriteria(BaseModel):
     """반성 단계에서 수집할 정보"""
     goal_achievement: str   # 목표 달성 여부
     best_prompt: str        # 좋은 프롬프트
-    worst_prompt: str       # 나쁜 프롬프트
     new_learning: str       # 새롭게 배운 것
 
 # ============================================================
@@ -244,13 +243,14 @@ PLANNING_PROMPT = f"""{BASE_SYSTEM_PROMPT}
 당신은 데이터 분석 계획 수립을 도와주는 어시스턴트입니다.
 사용자로부터 다음 정보를 수집해야 합니다:
 
-- **데이터 설명** (dataset_description): 지금 분석하려는 데이터에 대한 설명 (어떤 데이터인지, 어떤 열(컬럼)들이 있는지 등)
-- **분석 목표** (data_analysis_objective): 이번 데이터 분석에서 달성하고 싶은 목표
-- **분석 계획** (data_analysis_plan): 이번 데이터 분석 단계별 계획
+- **데이터 설명** (dataset_description) [필수]: 지금 분석하려는 데이터에 대한 설명 (어떤 데이터인지, 어떤 열(컬럼)들이 있는지 등)
+- **분석 목표** (data_analysis_objective) [필수]: 이번 데이터 분석에서 달성하고 싶은 목표
+- **분석 계획** (data_analysis_plan) [선택]: 이번 데이터 분석 단계별 계획 (아직 구체적인 계획이 없다면 건너뛸 수 있습니다)
 
 **중요한 지침:**
 
-1. **정보 수집 우선순위**: 한 번에 하나씩 차근차근 수집하세요. 먼저 데이터 설명, 다음 분석 목표, 마지막으로 분석 계획 순서로 진행하는 것이 좋습니다.
+1. **정보 수집 우선순위**: 한 번에 하나씩 차근차근 수집하세요. 먼저 데이터 설명(필수), 다음 분석 목표(필수) 순서로 진행합니다. 분석 계획은 학습자가 이미 생각해둔 것이 있으면 물어보되, 없다고 하면 건너뛰어도 됩니다.
+   - **중요**: 분석 계획이 없다는 답변(예: "없어요", "아직 없어요", "건너뛸게요", "계획 없어요" 등)을 받으면, 즉시 다음 세 가지 옵션을 제시하세요.
 
 2. **진행 상황 명시**: 매 응답 시작 부분에 현재까지 수집된 정보와 아직 필요한 정보를 명확히 표시하세요.
    - 예시: "✅ 데이터 설명을 잘 정리해주셨네요! 이제 분석 목표를 알려주시면 됩니다."
@@ -264,14 +264,14 @@ PLANNING_PROMPT = f"""{BASE_SYSTEM_PROMPT}
    - 이미 수집된 정보는 확인만 하고, 아직 수집되지 않은 정보에 집중하세요
 
 5. **완료 판단 및 다음 단계 선택 (매우 중요!)**:
-   - 세 가지 정보(데이터 설명, 분석 목표, 분석 계획)가 모두 충분히 수집되었다고 판단되면, 사용자에게 세 가지 옵션을 제시하세요:
+   - 두 가지 필수 정보(데이터 설명, 분석 목표)가 충분히 수집되었고, 분석 계획은 있으면 받고 없으면 건너뛸 수 있다고 판단되면, 사용자에게 세 가지 옵션을 제시하세요:
      * **'완료'**: 계획 단계를 완료하고 실행 단계로 넘어가기 (프롬프트 생성 포함)
      * **'계획 확인'**: 수집된 정보를 한국어로 정리해서 확인하기
      * **'계획 수정'**: 계획을 처음부터 다시 시작하고 싶다는 의도
    
    - 사용자의 선택을 기다려야 합니다. 사용자의 입력을 받아서 의도를 파악하세요:
-     * **'완료' 의도**: '완료', '계획 완료', '다음 단계로', '그대로 진행' 등의 표현을 받으면 → 즉시 PlanningCriteria 도구를 호출하고 세 가지 정보(데이터 설명, 분석 목표, 분석 계획)를 모두 포함시키세요. (프롬프트 생성은 자동으로 처리됩니다)
-     * **'계획 확인' 의도**: '계획 확인', '정보 확인', '정리해서 보여줘', '수집된 정보 보기' 등의 표현을 받으면 → 수집된 세 가지 정보를 한국어로 정리해서 보기 좋게 표시해주세요. 도구 호출 없이 단순히 정보를 정리해서 보여주면 됩니다.
+     * **'완료' 의도**: '완료', '계획 완료', '다음 단계로', '그대로 진행' 등의 표현을 받으면 → 즉시 PlanningCriteria 도구를 호출하고 필수 정보 2개(데이터 설명, 분석 목표)와 선택 정보(분석 계획, 있으면 포함 없으면 빈 값)를 포함시키세요. (프롬프트 생성은 자동으로 처리됩니다)
+     * **'계획 확인' 의도**: '계획 확인', '정보 확인', '정리해서 보여줘', '수집된 정보 보기' 등의 표현을 받으면 → 수집된 정보를 한국어로 정리해서 보기 좋게 표시해주세요. 도구 호출 없이 단순히 정보를 정리해서 보여주면 됩니다.
        * 다음 형식으로 정리해서 보여주세요:
          ```
          📋 수집된 계획 정보
@@ -282,17 +282,17 @@ PLANNING_PROMPT = f"""{BASE_SYSTEM_PROMPT}
          🎯 분석 목표:
          [대화에서 수집한 분석 목표]
          
-         📋 분석 계획:
-         [대화에서 수집한 분석 계획]
+         📋 분석 계획 (선택):
+         [대화에서 수집한 분석 계획, 없으면 "아직 구체적인 계획은 없습니다"]
          ```
      * **'계획 수정' 의도**: '계획 수정', '다시 시작', '초기화', '처음부터' 등의 표현을 받으면 → 사용자에게 "계획을 처음부터 다시 시작하시겠어요? (확인/취소)" 같은 확인 메시지를 보내주세요.
    
    - **중요**: 사용자의 의도를 정확히 파악하세요. 단순히 동일한 키워드가 아닌 의미를 이해하여 판단하세요. 예를 들어 "계획을 다시 생각해보고 싶어요"는 '계획 수정' 의도일 수 있습니다.
    - **절대 규칙**: '완료' 의도가 아닌 경우에는 도구 호출 없이 응답만 하면 됩니다. '완료' 의도일 때만 PlanningCriteria 도구를 호출하세요.
-   - PlanningCriteria 도구 호출 시 반드시 다음 세 가지 필드를 모두 채워야 합니다:
-     * `dataset_description`: 사용자가 제공한 데이터 설명
-     * `data_analysis_objective`: 사용자가 제시한 분석 목표
-     * `data_analysis_plan`: 사용자가 제시한 분석 계획
+   - PlanningCriteria 도구 호출 시 반드시 다음 필드를 채워야 합니다:
+     * `dataset_description`: 사용자가 제공한 데이터 설명 (필수)
+     * `data_analysis_objective`: 사용자가 제시한 분석 목표 (필수)
+     * `data_analysis_plan`: 사용자가 제시한 분석 계획 (선택, 없으면 빈 문자열)
 
 **응답 구조 가이드**:
 매 응답에는 다음 구조를 포함하는 것이 좋습니다:
@@ -320,18 +320,40 @@ PLANNING_PROMPT = f"""{BASE_SYSTEM_PROMPT}
 
 **예시 3 - 분석 목표 수집 후:**
 ```
-✅ 데이터 설명 | ✅ 분석 목표 | 🔄 분석 계획
+✅ 데이터 설명 | ✅ 분석 목표 | 🔄 분석 계획 (선택)
 
-좋아요! 품종 분류를 목표로 하신다면, 이를 위한 단계별 계획을 세워볼까요?
-어떤 순서로 분석을 진행하면 좋을지 생각해보시고 알려주세요.
+좋아요! 품종별 특성 비교 목표가 명확하네요.
+
+이제 분석을 진행하는 데 있어 단계별 계획이 있으신가요?
+(예: 1단계 데이터 확인 → 2단계 비교 → 3단계 시각화 등)
+
+아직 없으시다면 "없어요" 또는 "건너뛸게요"라고 말씀해주세요!
 ```
 
-**예시 4 - 모든 정보 수집 완료 시 (옵션 제시 필수!)**:
-세 가지 정보가 모두 수집되었다면, 사용자에게 세 가지 옵션을 제시해야 합니다:
+**예시 3-1 - 계획 없다는 답변 받은 경우:**
 ```
-✅ 데이터 설명 | ✅ 분석 목표 | ✅ 분석 계획
+[사용자 입력: "계획이 없어요" 또는 "없어요"]
 
-이제 데이터 설명, 분석 목표, 분석 계획이 모두 잘 정리되었습니다 😊
+알겠습니다! 구체적인 계획 없이 진행하셔도 충분해요 😊
+
+다음 중 하나를 선택해주세요:
+
+- **'완료'** : 계획 단계를 완료하고 실행 단계로 넘어가기
+
+- **'계획 확인'** : 수집된 정보를 정리해서 확인하기
+
+- **'계획 수정'** : 계획을 처음부터 다시 시작하기
+
+어떤 것을 진행하시겠어요?
+```
+
+**예시 4 - 필수 정보 수집 완료 시 (옵션 제시 필수!)**:
+필수 정보 두 가지가 수집되었다면, 사용자에게 세 가지 옵션을 제시해야 합니다:
+```
+✅ 데이터 설명 | ✅ 분석 목표 | ⬜ 분석 계획 (선택)
+
+이제 필수 정보(데이터 설명, 분석 목표)가 모두 잘 정리되었습니다 😊
+분석 계획은 있으면 작성하시고, 아직 구체적으로 생각하지 않으셨다면 건너뛰셔도 됩니다.
 
 다음 중 하나를 선택해주세요:
 
@@ -367,8 +389,8 @@ PLANNING_PROMPT = f"""{BASE_SYSTEM_PROMPT}
 🎯 분석 목표:
 [대화에서 수집한 분석 목표를 명확하게 정리]
 
-📋 분석 계획:
-[대화에서 수집한 분석 계획을 명확하게 정리]
+📋 분석 계획 (선택):
+[대화에서 수집한 분석 계획을 명확하게 정리, 없으면 "아직 구체적인 계획은 없습니다"]
 
 이렇게 정리되었습니다. 추가로 수정하거나 확인할 부분이 있으신가요?
 ```
@@ -404,73 +426,150 @@ REFLECTION_PROMPT = f"""{BASE_SYSTEM_PROMPT}
 
 당신은 데이터 분석 과정에 대한 반성을 도와주는 어시스턴트입니다.
 **중요**: 이전 단계(planning, execution)의 정보는 참고용일 뿐이며, 반성 단계에서는 무시하세요.
-반성 단계에서는 오직 다음 4가지 정보만 수집해야 합니다:
 
-- **목표 달성 여부** (goal_achievement): 이번 데이터 분석을 통해 분석 목표를 어느 정도 달성했는지
-- **좋은 프롬프트** (best_prompt): 데이터 분석 과정에서 가장 잘 AI에게 질문했다 생각하는 프롬프트
-- **나쁜 프롬프트** (worst_prompt): 데이터 분석 과정에서 개선이 필요하고 느끼는 프롬프트
-- **새롭게 배운 것** (new_learning): 이번 학습을 통해 얻은 새로운 지식이나 깨달음
+반성 단계에서는 오직 다음 3가지 정보를 수집하되, **각 항목마다 1차 질문 + 후속 질문(2차)으로 깊이를 더합니다**:
+
+- **목표 달성 여부** (goal_achievement):
+  - 1차: 이번 데이터 분석을 통해 분석 목표를 어느 정도 달성했는지
+  - 2차 후속: 
+    * 달성했다면 → "달성하는 과정에서 어려움을 어떻게 극복했나요?"
+    * 달성하지 못했다면 → "어떤 부분이 아쉬웠나요? 더 보완하고 싶은 부분은?"
+
+- **좋은 프롬프트** (best_prompt):
+  - 1차: 데이터 분석 과정에서 가장 잘 작동했던 프롬프트
+  - 2차 후속: "그 프롬프트를 어떻게 생각해냈나요? 어떻게 해서 얻게 된 것 같나요?"
+
+- **새롭게 배운 것** (new_learning):
+  - 1차: 이번 학습을 통해 얻은 새로운 지식이나 깨달음
+  - 2차 후속: 만약 데이터 자체에 대한 얘기만 했다면 → "AI와 함께 데이터 분석을 하는 '과정'에서 새롭게 배운 것은 무엇인가요?"
 
 **⚠️ 절대 하지 말아야 할 것:**
 - 이전 단계의 "✅ 데이터 설명 | ✅ 분석 목표 | ✅ 분석 계획" 같은 헤더를 사용하지 마세요
-- 반성 단계에서는 "✅ 목표 달성 | ✅ 좋은 프롬프트 | ✅ 나쁜 프롬프트 | ✅ 새로 배운 것" 헤더만 사용하세요
+- 반성 단계에서는 "✅✅ 목표 달성 | ✅✅ 좋은 프롬프트 | ✅✅ 새로 배운 것" 형식으로 표시하세요
+  (각 항목마다 ✅가 2개씩 = 1차+2차 질문 완료)
 
-1. **정보 수집 우선순위**: 한 번에 하나씩 차근차근 수집하세요. 먼저 목표 달성 여부, 다음 좋은 프롬프트와 나쁜 프롬프트, 마지막으로 새롭게 배운 것 순서로 진행하는 것이 좋습니다.
+**중요한 지침:**
 
-2. **진행 상황 명시**: 매 응답 시작 부분에 현재까지 수집된 정보와 아직 필요한 정보를 명확히 표시하세요.
-   - 예시: "✅ 목표 달성 여부를 잘 정리해주셨네요! 이제 좋은 프롬프트를 알려주시면 됩니다."
-   - 예시: "✅ 목표 달성 | 🔄 좋은 프롬프트 | ⬜ 나쁜 프롬프트 | ⬜ 새로 배운 것"
-   - 헤더는 다음 네 항목만 정확히 포함해야 합니다: "목표 달성", "좋은 프롬프트", "나쁜 프롬프트", "새로 배운 것".
-     "실행 완료"와 같은 다른 항목은 헤더에 추가하지 마세요.
+1. **정보 수집 순서**: 
+   - 각 항목당 2턴(1차 질문 + 2차 후속 질문)으로 진행
+   - 순서: 목표 달성(1차→2차) → 좋은 프롬프트(1차→2차) → 새로 배운 것(1차→2차)
+   - 2차 후속 질문은 사용자의 1차 답변 내용에 따라 조건부로 조정하세요
+
+2. **진행 상황 명시**: 매 응답 시작 부분에 현재까지 수집된 정보를 명확히 표시하세요.
+   - 각 항목마다 체크마크 2개(✅✅)로 완료 표시
+   - 진행 중인 항목은 1개 또는 진행 마크(🔄)로 표시
+   - 예시: "✅✅ 목표 달성 | ✅🔄 좋은 프롬프트 | ⬜⬜ 새로 배운 것"
+   - 헤더는 다음 세 항목만 정확히 포함: "목표 달성", "좋은 프롬프트", "새로 배운 것"
 
 3. **정보 품질 확인**: 사용자의 답변이 명확하고 충분한지 확인하세요. 모호하거나 부족하면 구체화를 요청하세요.
 
 4. **질문 전략**:
-   - 정보가 명확하지 않으면 구체화를 위한 질문을 하세요
-   - 한 번에 너무 많은 질문을 하지 말고, 사용자가 편하게 답할 수 있도록 한 번에 하나씩 질문 하세요
+   - 한 번에 하나씩 질문하세요 (1차 답변 받고 → 2차 질문 → 다음 항목으로)
+   - 2차 질문은 1차 답변의 맥락을 고려하여 자연스럽게 연결하세요
    - 이미 수집된 정보는 확인만 하고, 아직 수집되지 않은 정보에 집중하세요
-   - 각 항목에 대해 구체적이고 실질적인 내용을 얻을 수 있도록 도와주세요
 
-5. **완료 판단**: 네 가지 정보(목표 달성 여부, 좋은 프롬프트, 나쁜 프롬프트, 새롭게 배운 것)가 모두 충분히 수집되었다고 판단되면 관련 도구를 호출하세요.
+5. **완료 판단**: 세 가지 정보의 1차+2차 질문이 모두 완료되면 (총 6개 체크마크: ✅✅✅✅✅✅) 관련 도구를 호출하세요.
 
 **응답 구조 가이드**:
 매 응답에는 다음 구조를 포함하는 것이 좋습니다:
-- [진행 상황 요약 - 어떤 정보가 수집되었는지 표시]
+- [진행 상황 헤더 - 체크마크로 표시]
 - [대화 내용 - 질문 또는 답변에 대한 피드백]
-- [다음 단계 안내 - 아직 필요한 정보가 있다면]
+- [다음 질문 - 1차 또는 2차 후속 질문]
 
 **응답 예시**:
 
-**예시 1 - 첫 질문:**
+**예시 1 - 목표 달성 1차 질문 (첫 시작):**
 ```
-🔄 목표 달성 | ⬜ 좋은 프롬프트 | ⬜ 나쁜 프롬프트 | ⬜ 새로 배운 것
+🔄⬜ 목표 달성 | ⬜⬜ 좋은 프롬프트 | ⬜⬜ 새로 배운 것
 
 안녕하세요! 데이터 분석 과정을 돌아보며 함께 반성해볼까요? 🪞
-먼저 이번 데이터 분석을 통해 분석 목표를 어느 정도 달성하셨는지 알려주세요!
+먼저 이번 데이터 분석을 통해 분석 목표를 어느 정도 달성하셨나요?
 ```
 
-**예시 2 - 목표 달성 여부 수집 후:**
+**예시 2 - 목표 달성 2차 질문 (긍정 케이스):**
 ```
-✅ 목표 달성 | 🔄 좋은 프롬프트 | ⬜ 나쁜 프롬프트 | ⬜ 새로 배운 것
+[사용자: "네, 목표를 80% 정도 달성했어요"]
 
-목표 달성에 대한 성찰을 잘 정리해주셨네요! 
-이제 데이터 분석 과정에서 AI에게 질문할 때, 가장 잘 작동했던 프롬프트가 무엇이었는지 알려주시면 좋을 것 같아요. 어떤 질문이 도움이 되었나요?
-```
+✅🔄 목표 달성 | ⬜⬜ 좋은 프롬프트 | ⬜⬜ 새로 배운 것
 
-**예시 3 - 좋은 프롬프트 수집 후:**
-```
-✅ 목표 달성 | ✅ 좋은 프롬프트 | 🔄 나쁜 프롬프트 | ⬜ 새로 배운 것
-
-좋은 프롬프트를 잘 정리해주셨네요! 
-반대로 개선이 필요했거나, 더 잘 질문할 수 있었을 것 같은 프롬프트는 어떤 것이었나요? 어떤 점이 아쉬웠는지도 함께 알려주세요.
+좋아요! 목표를 상당 부분 달성하셨네요 👍
+그렇다면 달성하는 과정에서 어려움이 있었다면 어떻게 극복하셨나요?
 ```
 
-**예시 4 - 나쁜 프롬프트 수집 후:**
+**예시 2-1 - 목표 달성 2차 질문 (부정 케이스):**
 ```
-✅ 목표 달성 | ✅ 좋은 프롬프트 | ✅ 나쁜 프롬프트 | 🔄 새로 배운 것
+[사용자: "아니요, 목표를 40% 정도밖에 달성하지 못했어요"]
+
+✅🔄 목표 달성 | ⬜⬜ 좋은 프롬프트 | ⬜⬜ 새로 배운 것
+
+그렇군요. 목표 달성이 쉽지 않았네요.
+어떤 부분이 아쉬웠나요? 더 보완하고 싶은 부분은 무엇인가요?
+```
+
+**예시 3 - 좋은 프롬프트 1차 질문:**
+```
+[사용자: (2차 답변 완료)]
+
+✅✅ 목표 달성 | 🔄⬜ 좋은 프롬프트 | ⬜⬜ 새로 배운 것
+
+목표 달성에 대한 성찰을 잘 정리해주셨네요!
+이제 데이터 분석 과정에서 AI에게 질문할 때, 가장 잘 작동했던 프롬프트가 무엇이었나요?
+```
+
+**예시 4 - 좋은 프롬프트 2차 질문:**
+```
+[사용자: "품종별로 꽃잎 길이 평균을 그룹화해서 보여줘"]
+
+✅✅ 목표 달성 | ✅🔄 좋은 프롬프트 | ⬜⬜ 새로 배운 것
+
+좋은 프롬프트네요! 구체적이고 명확한 요청이에요.
+그 프롬프트를 어떻게 생각해냈나요? 어떻게 해서 얻게 된 것 같아요?
+```
+
+**예시 5 - 새로 배운 것 1차 질문:**
+```
+[사용자: (2차 답변 완료)]
+
+✅✅ 목표 달성 | ✅✅ 좋은 프롬프트 | 🔄⬜ 새로 배운 것
 
 좋아요! 프롬프트에 대한 성찰을 잘 정리해주셨어요.
-마지막으로, 이번 학습을 통해 새롭게 배운 점이나 깨달은 것이 있다면 알려주세요. 어떤 인사이트를 얻으셨나요?
+마지막으로, 이번 학습을 통해 새롭게 배운 점이나 깨달은 것이 있다면 알려주세요.
+```
+
+**예시 6 - 새로 배운 것 2차 질문 (데이터 중심 답변 시):**
+```
+[사용자: "꽃잎 길이가 품종마다 다르다는 걸 알았어요"]
+
+✅✅ 목표 달성 | ✅✅ 좋은 프롬프트 | ✅🔄 새로 배운 것
+
+데이터에서 흥미로운 발견을 하셨네요!
+그렇다면 AI와 함께 데이터 분석을 하는 '과정' 자체에서 새롭게 배운 것은 무엇인가요?
+(예: AI에게 질문하는 방법, 결과 해석하는 방법, 프롬프트 작성 팁 등)
+```
+
+**예시 6-1 - 새로 배운 것 2차 질문 (과정 중심 답변 시):**
+```
+[사용자: "AI에게 구체적으로 질문하면 더 좋은 답을 받는다는 걸 배웠어요"]
+
+✅✅ 목표 달성 | ✅✅ 좋은 프롬프트 | ✅🔄 새로 배운 것
+
+훌륭한 깨달음이네요! 구체성의 중요성을 발견하셨군요.
+그 외에 AI 활용 과정에서 더 배운 것이 있다면 알려주세요. 
+없다면 "없어요"라고 말씀해주시면 마무리하겠습니다!
+```
+
+**예시 7 - 모든 정보 수집 완료:**
+```
+[사용자: (모든 답변 완료)]
+
+✅✅ 목표 달성 | ✅✅ 좋은 프롬프트 | ✅✅ 새로 배운 것
+
+정말 잘하셨어요! 모든 반성을 깊이 있게 정리해주셨습니다 🎉
+
+다음 중 하나를 선택해주세요:
+- **'완료'**: 반성을 마무리하고 학습 요약 보기
+- **'반성 확인'**: 수집된 반성 내용 다시 보기
+- **'반성 수정'**: 처음부터 다시 시작하기
 ```
 """
 
@@ -516,13 +615,12 @@ def planning_node(state: LearningAgentState):
     messages_with_prompt = [SystemMessage(content=PLANNING_PROMPT)] + state["messages"]
     response = llm_with_tools.invoke(messages_with_prompt)
     
-    # ⭐ 응답 내용 분석: ✅✅✅ 패턴 확인
+    # ⭐ 응답 내용 분석: 필수 2개(✅✅) 패턴 확인
     if isinstance(response, AIMessage) and response.content:
-        # 세 개의 체크마크 모두 있는지 확인
-        if (response.content.count("✅") >= 3 and 
+        # 필수 두 개의 체크마크가 있는지 확인
+        if (response.content.count("✅") >= 2 and 
             "데이터 설명" in response.content and 
-            "분석 목표" in response.content and 
-            "분석 계획" in response.content):
+            "분석 목표" in response.content):
             
             # ⭐ 플래그 설정하고 END로 보내기 (다음 노드로 가지 않음!)
             return {
@@ -570,6 +668,12 @@ def finalize_planning(state: LearningAgentState):
     dataset_description = planning_data.get("dataset_description", "")
     data_analysis_objective = planning_data.get("data_analysis_objective", "")
     data_analysis_plan = planning_data.get("data_analysis_plan", "")
+    
+    # 계획이 없는 경우 처리
+    if not data_analysis_plan or data_analysis_plan.strip() in ["", "정보 없음", "N/A", "없음"]:
+        plan_text = "(아직 구체적인 분석 계획은 없습니다. 데이터 설명과 목표를 바탕으로 적절한 분석 접근 방법을 제시해주세요.)"
+    else:
+        plan_text = data_analysis_plan
 
     # 프롬프트 생성용 입력 텍스트 구성
     prompt_input = f"""
@@ -584,7 +688,7 @@ def finalize_planning(state: LearningAgentState):
 {data_analysis_objective}
 
 **분석 계획:**
-{data_analysis_plan}
+{plan_text}
 
 위 정보를 종합하여 데이터 분석 작업을 수행할 수 있는 상세하고 읽기 쉬운 한국어 시스템 프롬프트를 생성해주세요.
 프롬프트는 마크다운 형식을 활용하여 섹션을 명확히 구분하고, 긴 문장보다는 불릿 포인트나 번호 목록을 사용하여 가독성을 높여주세요.
@@ -669,6 +773,7 @@ def planning_complete_confirmation(state: LearningAgentState):
     complete_keywords = ["완료", "계획 완료", "다음 단계", "진행", "넘어가"]
     confirm_keywords = ["계획 확인", "정보 확인", "확인", "정리", "보여줘"]
     reset_keywords = ["계획 수정", "다시", "초기화", "처음부터", "재시작"]
+    no_plan_keywords = ["없어요", "없습니다", "계획 없", "없음", "건너뛸", "건너뛰", "스킵", "패스"]
     
     # 1. 완료 의도 → PlanningCriteria tool_calls 생성
     if any(keyword in last_human_msg for keyword in complete_keywords):
@@ -696,9 +801,37 @@ def planning_complete_confirmation(state: LearningAgentState):
             "awaiting_planning_confirmation": False  # 플래그 OFF
         }
     
+    # 1-1. 계획 없음 의도 → 옵션 제시로 전환 (안전망)
+    elif any(keyword in last_human_msg for keyword in no_plan_keywords):
+        response = AIMessage(content="""
+알겠습니다! 구체적인 계획 없이 진행하셔도 충분해요 😊
+
+다음 중 하나를 선택해주세요:
+
+- **'완료'** : 계획 단계를 완료하고 실행 단계로 넘어가기
+
+- **'계획 확인'** : 수집된 정보를 정리해서 확인하기
+
+- **'계획 수정'** : 계획을 처음부터 다시 시작하기
+
+어떤 것을 진행하시겠어요?
+""")
+        return {
+            "messages": [response],
+            "phase": "planning",
+            "awaiting_planning_confirmation": True  # 계속 대기
+        }
+    
     # 2. 계획 확인 의도 → 정보 정리 출력
     elif any(keyword in last_human_msg for keyword in confirm_keywords):
         planning_info = extract_planning_info_from_conversation(state)
+        
+        # 계획이 없는 경우 처리
+        plan = planning_info.get('data_analysis_plan', '')
+        if not plan or plan.strip() in ["", "정보 없음", "N/A", "없음", "추출 실패"]:
+            plan_display = "(아직 구체적인 계획은 세우지 않았습니다)"
+        else:
+            plan_display = plan
         
         summary = f"""
 📋 수집된 계획 정보
@@ -709,8 +842,8 @@ def planning_complete_confirmation(state: LearningAgentState):
 🎯 분석 목표:
 {planning_info.get('data_analysis_objective', '정보가 수집되지 않았습니다.')}
 
-📋 분석 계획:
-{planning_info.get('data_analysis_plan', '정보가 수집되지 않았습니다.')}
+📋 분석 계획 (선택):
+{plan_display}
 
 ---
 
@@ -765,15 +898,15 @@ def extract_planning_info_from_conversation(state: LearningAgentState) -> dict:
     
     extraction_prompt = """
 다음 대화 내역에서 세 가지 정보를 추출하세요:
-1. 데이터 설명 (dataset_description)
-2. 분석 목표 (data_analysis_objective)
-3. 분석 계획 (data_analysis_plan)
+1. 데이터 설명 (dataset_description) - 필수
+2. 분석 목표 (data_analysis_objective) - 필수
+3. 분석 계획 (data_analysis_plan) - 선택 (명확히 언급되지 않았으면 빈 문자열로 설정)
 
 JSON 형식으로만 반환하세요. 다른 텍스트는 포함하지 마세요:
 {
   "dataset_description": "...",
   "data_analysis_objective": "...",
-  "data_analysis_plan": "..."
+  "data_analysis_plan": "..." (없으면 "")
 }
 """
     
@@ -1043,26 +1176,14 @@ def execution_node(state: LearningAgentState):
             "execution_assessment_history": state.get("execution_assessment_history"),
         }
 
-def summarize_execution_conversation(state: LearningAgentState):
-    """실행 단계 대화 요약 생성 - Stage 3 시작 시 자동 실행"""
+def summarize_execution(state: LearningAgentState):
+    """실행 단계 대화 요약 생성"""
     messages = state.get("messages", [])
+    phase_end_indices = state.get("phase_end_indices", {})
     
-    # 실행 단계 메시지만 추출 (finalize_planning 이후 ~ execution_completed 전까지)
-    execution_start_idx = 0
-    execution_end_idx = len(messages)
-    
-    # 실행 단계 시작점 찾기
-    for i, msg in enumerate(messages):
-        if isinstance(msg, ToolMessage) and "계획이 완성되었습니다" in msg.content:
-            execution_start_idx = i + 1
-            break
-    
-    # 실행 단계 종료점 찾기 (execution_completed 메시지 전까지)
-    for i in range(len(messages) - 1, -1, -1):
-        msg = messages[i]
-        if isinstance(msg, AIMessage) and "실행 단계를 완료했습니다" in msg.content:
-            execution_end_idx = i + 1
-            break
+    # Execution 단계의 시작과 끝 인덱스 찾기
+    execution_start_idx = phase_end_indices.get("planning", 0)
+    execution_end_idx = phase_end_indices.get("execution", len(messages))
     
     # 실행 단계 메시지 추출
     execution_messages = messages[execution_start_idx:execution_end_idx]
@@ -1086,9 +1207,9 @@ def summarize_execution_conversation(state: LearningAgentState):
         print(f"⚠️ 대화 요약 생성 오류: {e}")
         summary = "대화 요약 생성에 실패했습니다."
     
-    # 요약을 메시지로 추가
+    # 요약을 메시지로 추가 (사이드바 안내만)
     summary_message = AIMessage(
-        content=f"📊 실행 단계 대화 요약이 완료되었습니다!\n\n{summary}"
+        content="📊 실행 단계 대화 요약이 완료되었습니다!\n\n👈 왼쪽 사이드바에서 요약 내용을 확인해주세요!"
     )
     
     return {
@@ -1116,8 +1237,8 @@ def reflection_node(state: LearningAgentState):
             return {
                 "messages": [AIMessage(content=(
                     "🪞 Stage 3를 시작해요. 아래 중 하나를 선택해주세요:\n\n"
-                    "1) 반성 진행\n"
-                    "2) 실행 단계 대화 요약\n\n"
+                    "1) 반성 진행 (요약 없이 바로 시작)\n"
+                    "2) 실행 단계 대화 요약 먼저 보기\n\n"
                     "원하는 선택을 '반성' 또는 '요약'으로 답해주세요."
                 ))],
                 "phase": "reflection",
@@ -1125,20 +1246,34 @@ def reflection_node(state: LearningAgentState):
                 "awaiting_reflection_start_choice": True
             }
 
-        # 선택 질문을 보낸 상태: '바로'면 요약 없이 진행, 그 외엔 안내만
-        if not (last_human and any(k in last_human for k in ["바로", "반성", "진행", "시작"])):
-            # 요약을 원하거나 아직 선택 안함 → 간단 안내 후 입력 대기
+        # 선택 질문을 보낸 상태: "반성 진행" 선택 시 요약 스킵하고 바로 진행
+        if last_human and any(k in last_human for k in ["반성", "반성 진행", "바로", "진행", "시작", "반성 시작"]):
+            # summary_generated를 True로 설정하여 요약 분기를 스킵
+            # 바로 반성 질문 시작
+            return {
+                "messages": [AIMessage(content=(
+                    "🔄⬜ 목표 달성 | ⬜⬜ 좋은 프롬프트 | ⬜⬜ 새로 배운 것\n\n"
+                    "안녕하세요! 데이터 분석 과정을 돌아보며 함께 반성해볼까요? 🪞\n"
+                    "먼저, 이번 데이터 분석을 통해 분석 목표를 어느 정도 달성하셨나요?"
+                ))],
+                "phase": "reflection",
+                "waiting_for_input": True,
+                "summary_generated": True,  # 요약 없이 진행하는 것으로 표시
+                "awaiting_reflection_start_choice": False
+            }
+        else:
+            # 요약을 원하거나 아직 명확한 선택 안함 → route_initial이 처리할 것
             return {
                 "messages": [AIMessage(content=(
                     "원하시면 '요약'이라고 답해 실행 대화를 정리해드릴게요. "
-                    "바로 진행은 '반성'이라고 답해주세요."
+                    "바로 진행하려면 '반성'이라고 답해주세요."
                 ))],
                 "phase": "reflection",
                 "waiting_for_input": True,
                 "awaiting_reflection_start_choice": True
             }
 
-    # 요약 이후: 반성 수집 진행
+    # 요약 완료 후 또는 요약 스킵 후: 반성 수집 진행
     # reflection 단계 메시지만 필터링해서 전달
     phase_end_indices = state.get("phase_end_indices")
     reflection_messages = get_phase_messages(state["messages"], "reflection", phase_end_indices)
@@ -1166,13 +1301,13 @@ def reflection_node(state: LearningAgentState):
             flags=re.IGNORECASE
         )
         
-        # 네 항목 수집 완료 패턴 시 옵션 제시
-        if response.content.count("✅") >= 4:
+        # ✅ 6개 수집 완료 패턴 시 옵션 제시 (3개 항목 × 2턴)
+        if response.content.count("✅") >= 6:
             return {
                 "messages": [
                     response, 
                     AIMessage(content=(
-                        "✅ 목표 달성 | ✅ 좋은 프롬프트 | ✅ 나쁜 프롬프트 | ✅ 새로 배운 것\n\n"
+                        "✅✅ 목표 달성 | ✅✅ 좋은 프롬프트 | ✅✅ 새로 배운 것\n\n"
                         "다음 중 선택해주세요:\n- '완료'\n- '반성 확인'\n- '반성 수정'"
                     ))
                 ],
@@ -1197,10 +1332,15 @@ def extract_reflection_info_from_conversation(state: LearningAgentState) -> dict
         if hasattr(m, "content") and m.content
     )
     sys = SystemMessage(content="""
-다음 대화 내역에서 네 가지 정보를 추출하세요:
-1) goal_achievement 2) best_prompt 3) worst_prompt 4) new_learning
+다음 대화 내역에서 세 가지 정보를 추출하세요.
+각 항목은 1차 질문과 2차 후속 질문에 대한 답변이 모두 포함되어 있으므로, 이를 통합하여 하나의 답변으로 추출하세요:
+
+1) goal_achievement: 목표 달성 여부 + 극복 방법 or 아쉬운 점을 통합
+2) best_prompt: 좋은 프롬프트 + 그 프롬프트를 생각해낸 방법을 통합
+3) new_learning: 새롭게 배운 것 + AI 활용 과정에서 배운 것을 통합
+
 JSON으로만 반환:
-{"goal_achievement":"...", "best_prompt":"...", "worst_prompt":"...", "new_learning":"..."}
+{"goal_achievement":"...", "best_prompt":"...", "new_learning":"..."}
 """)
     resp = llm.invoke([sys, HumanMessage(content=f"대화 내역:\n{conversation_text}")]).content.strip()
     import json
@@ -1227,7 +1367,6 @@ def reflection_complete_confirmation(state: LearningAgentState):
         sys = SystemMessage(content=f"""사용자가 반성 단계를 완료했습니다. 다음 정보를 ReflectionCriteria로 제출하세요:
 목표 달성 여부: {info.get('goal_achievement','정보 없음')}
 좋은 프롬프트: {info.get('best_prompt','정보 없음')}
-나쁜 프롬프트: {info.get('worst_prompt','정보 없음')}
 새로 배운 것: {info.get('new_learning','정보 없음')}""")
         response = llm_with_tools.invoke([sys] + messages[-5:])
         return {
@@ -1242,7 +1381,6 @@ def reflection_complete_confirmation(state: LearningAgentState):
             "📋 수집된 반성 정보\n\n"
             f"🎯 목표 달성 여부:\n{info.get('goal_achievement','N/A')}\n\n"
             f"👍 좋은 프롬프트:\n{info.get('best_prompt','N/A')}\n\n"
-            f"👎 나쁜 프롬프트:\n{info.get('worst_prompt','N/A')}\n\n"
             f"💡 새롭게 배운 것:\n{info.get('new_learning','N/A')}\n\n"
             "- '완료'를 입력하면 마무리합니다\n- '반성 수정'을 입력하면 다시 시작합니다"
         )
@@ -1344,18 +1482,24 @@ def generate_summary(state: LearningAgentState):
     planning_info = state.get("planning_info", {})
     reflection_info = state.get("reflection_info", {})
     
+    # 계획이 없는 경우 처리
+    plan = planning_info.get('data_analysis_plan', '')
+    if not plan or plan.strip() in ["", "N/A", "정보 없음", "없음"]:
+        plan_display = "(구체적인 계획 없이 진행)"
+    else:
+        plan_display = plan
+    
     summary_prompt = f"""
 학습 과정 요약:
 
 【계획 단계】
 - 📊 데이터 설명: {planning_info.get('dataset_description', 'N/A')}
 - 🎯 데이터 분석 목표: {planning_info.get('data_analysis_objective', 'N/A')}
-- 📋 데이터 분석 계획: {planning_info.get('data_analysis_plan', 'N/A')}
+- 📋 데이터 분석 계획: {plan_display}
 
 【반성 단계】
 - 🎯 목표 달성 여부: {reflection_info.get('goal_achievement', 'N/A')}
 - 👍 좋은 프롬프트: {reflection_info.get('best_prompt', 'N/A')}
-- 👎 나쁜 프롬프트: {reflection_info.get('worst_prompt', 'N/A')}
 - 💡 새롭게 배운 것: {reflection_info.get('new_learning', 'N/A')}
 """
     
@@ -1439,6 +1583,11 @@ def route_initial(state) -> Literal["planning", "execution", "reflection", "summ
                 # 선택 대기 상태에서 요약 선택 → summarize_execution으로
                 if any(k in t for k in ["요약", "요약해줘", "요약 시작", "요약 생성", "정리", "보여줘"]):
                     return "summarize_execution"
+                # 선택 대기 상태에서 반성 진행 선택 → reflection으로 (요약 스킵)
+                if any(k in t for k in ["반성", "반성 진행", "바로", "진행", "시작", "반성 시작"]):
+                    # summary_generated를 True로 설정하여 요약 단계 스킵
+                    # (하지만 route_initial에서는 state를 직접 수정할 수 없으므로 reflection_node에서 처리)
+                    return "reflection"
             # (선택 여부와 무관) 일반 요약 의도도 허용
             if any(k in t for k in ["요약", "요약해줘", "요약 시작", "요약 생성", "정리", "보여줘"]):
                 return "summarize_execution"
@@ -1485,13 +1634,13 @@ def route_from_planning(state) -> Literal["planning_complete_confirmation", "fin
         # 사용자 입력이 아직 없으면 대기
         return END
 
-    # 3. "✅✅✅" 패턴 감지
+    # 3. "✅✅" 패턴 감지 (필수 2개)
     if isinstance(last_message, AIMessage):
         content = last_message.content
-        # 세 개의 체크마크가 모두 있는지 확인
-        if content.count("✅") >= 3:
-            # 특히 "✅ 데이터 설명 | ✅ 분석 목표 | ✅ 분석 계획" 패턴
-            if "데이터 설명" in content and "분석 목표" in content and "분석 계획" in content:
+        # 필수 두 개의 체크마크가 있는지 확인
+        if content.count("✅") >= 2:
+            # 특히 "✅ 데이터 설명 | ✅ 분석 목표" 패턴
+            if "데이터 설명" in content and "분석 목표" in content:
                 return "planning_complete_confirmation"
     
     # 4. planning_info_collected 플래그 확인 (⭐ 추가!)
@@ -1557,7 +1706,7 @@ def create_learning_agent_graph():
     workflow.add_node("planning_complete_confirmation", planning_complete_confirmation)
     workflow.add_node("finalize_planning", finalize_planning)
     workflow.add_node("execution", execution_node)
-    workflow.add_node("summarize_execution", summarize_execution_conversation)
+    workflow.add_node("summarize_execution", summarize_execution)
     workflow.add_node("reflection", reflection_node)
     workflow.add_node("reflection_complete_confirmation", reflection_complete_confirmation)
     workflow.add_node("finalize_reflection", finalize_reflection)
@@ -1761,4 +1910,42 @@ class LearningAgentRunner:
         self.create_new_thread()
         # 초기화 메시지 전송하여 planning 단계 시작
         self.initialize()
+        return self.get_state()
+    
+    def setup_test_reflection_stage(self):
+        """Stage 3 테스트를 위한 더미 state 설정"""
+        # 더미 메시지 및 state 생성
+        dummy_messages = [
+            SystemMessage(content="시스템 시작"),
+            AIMessage(content="안녕하세요! 학습을 시작해볼까요?"),
+            HumanMessage(content="네, 시작할게요"),
+        ]
+        
+        dummy_state = {
+            "messages": dummy_messages,
+            "phase": "reflection",
+            "planning_completed": True,
+            "execution_completed": True,
+            "reflection_completed": False,
+            "waiting_for_input": True,
+            "summary_generated": True,
+            "awaiting_planning_confirmation": False,
+            "awaiting_reflection_confirmation": False,
+            "planning_info": {
+                "dataset_description": "테스트 데이터셋 - Iris 품종별 꽃잎 특징 데이터",
+                "data_analysis_objective": "품종별 꽃잎 길이와 너비의 차이를 시각화하고 분석하기",
+                "data_analysis_plan": "산점도와 박스플롯을 활용하여 품종별 특징 비교"
+            },
+            "reflection_info": None,
+            "phase_end_indices": {
+                "planning": 3,
+                "execution": 3
+            },
+            "execution_intent_history": [],
+            "execution_assessment_history": []
+        }
+        
+        # State 업데이트
+        self.graph.update_state(self.config, dummy_state, as_node="__start__")
+        
         return self.get_state()

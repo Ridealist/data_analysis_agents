@@ -30,8 +30,12 @@ def show_planning_info(planning_data: dict):
     st.markdown("### 🎯 분석 목표")
     st.info(planning_data.get('data_analysis_objective', 'N/A'))
     
-    st.markdown("### 📋 분석 계획")
-    st.info(planning_data.get('data_analysis_plan', 'N/A'))
+    st.markdown("### 📋 분석 계획 (선택)")
+    plan = planning_data.get('data_analysis_plan', '')
+    if not plan or plan.strip() in ["", "N/A", "정보 없음", "없음"]:
+        st.info("(구체적인 계획 없이 진행)")
+    else:
+        st.info(plan)
 
 
 def render_message(msg, planning_info=None):
@@ -59,12 +63,12 @@ def main():
     st.title("📝 Stage 1: 데이터 분석 계획 수립")
     
     st.markdown("""
-    **Learning Agent - 계획 단계**
+    **Learning AI Agent - 계획 단계**
     
     튜터와 대화하며 데이터 분석 계획을 세워봅시다! 다음 정보를 수집합니다:
     - 📊 데이터 설명
     - 🎯 분석 목표
-    - 📋 분석 계획
+    - 📋 분석 계획 (선택: 계획이 없으면 건너뛸 수 있음)
     """)
     
     # Runner 초기화
@@ -161,22 +165,6 @@ def main():
                 st.rerun()
             elif send_button:
                 st.warning("메시지를 입력해주세요")
-    
-    # State Inspector (개발자용)
-    with st.expander("🔧 전체 State 보기 (개발자용)"):
-        if state:
-            st.write(state)
-            # display_state = {
-            #     "phase": state.get("phase"),
-            #     "planning_completed": state.get("planning_completed"),
-            #     "execution_completed": state.get("execution_completed"),
-            #     "reflection_completed": state.get("reflection_completed"),
-            #     "planning_info": state.get("planning_info"),
-            #     "reflection_info": state.get("reflection_info"),
-            #     "message_count": len(state.get("messages", []))
-            # }
-            # st.json(display_state)
-
 
 if __name__ == "__main__":
     main()
