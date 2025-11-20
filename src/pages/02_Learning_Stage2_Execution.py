@@ -762,17 +762,32 @@ def render_csv_agent_execution_ui(learning_agent: LearningAgentRunner):
     # 데이터 업로드
     with st.expander("📁 데이터 업로드", expanded=True):
         uploaded_file = st.file_uploader(
-            "CSV 파일을 업로드해주세요",
-            type=["csv"],
-            help="분석할 데이터를 CSV 형식으로 업로드해주세요.",
+            "데이터 파일을 업로드해주세요",
+            type=["csv", "xlsx", "xls", "tsv", "txt"],
+            help="분석할 데이터를 업로드해주세요. (지원 형식: CSV, Excel, TSV/TXT)",
         )
 
         if uploaded_file is not None:
             try:
-                dataframe = pd.read_csv(uploaded_file)
+                # 파일 확장자에 따라 적절한 pandas 함수 사용
+                file_extension = uploaded_file.name.split(".")[-1].lower()
 
+                if file_extension == "csv":
+                    dataframe = pd.read_csv(uploaded_file)
+                elif file_extension in ["xlsx", "xls"]:
+                    # .xls와 .xlsx를 구분하여 적절한 엔진 사용
+                    if file_extension == "xls":
+                        dataframe = pd.read_excel(uploaded_file, engine="xlrd")
+                    else:  # xlsx
+                        dataframe = pd.read_excel(uploaded_file, engine="openpyxl")
+                elif file_extension in ["tsv", "txt"]:
+                    dataframe = pd.read_csv(uploaded_file, sep="\t")
+                else:
+                    raise ValueError(f"지원하지 않는 파일 형식입니다: {file_extension}")
+
+                # 데이터프레임 유효성 검사
                 if dataframe.empty or len(dataframe.columns) == 0:
-                    st.error("❌ 업로드된 CSV 파일이 비어있거나 컬럼이 없습니다.")
+                    st.error("❌ 업로드된 파일이 비어있거나 컬럼이 없습니다.")
                     st.session_state["uploaded_data"] = None
                 else:
                     st.session_state["uploaded_data"] = dataframe
