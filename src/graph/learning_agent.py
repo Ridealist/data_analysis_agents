@@ -2,6 +2,7 @@ import streamlit as st
 import sqlite3
 import uuid
 import re
+import json
 from typing import TypedDict, Dict, Optional, Literal, Annotated, List
 from pydantic import BaseModel
 
@@ -718,6 +719,43 @@ def finalize_planning(state: LearningAgentState):
     existing_indices = state.get("phase_end_indices") or {}
     phase_end_indices = {**existing_indices, "planning": current_msg_count}  # 새 딕셔너리 생성
 
+    # -------------------------------------------------
+    # DynamoDB 로그 저장 (Stage 1 - 계획 결과 중심)
+    # -------------------------------------------------
+    try:
+        conversation_id = st.session_state.get("learning_conversation_id")
+        message_manager = st.session_state.get("learning_message_manager")
+
+        if conversation_id and message_manager:
+            # 1) 계획 정보(planning_data)를 JSON으로 저장
+            try:
+                planning_json = json.dumps(planning_data, ensure_ascii=False)
+                message_manager.save_message(
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content_type="learning_stage1_planning_info",
+                    content=planning_json,
+                    llm_model=BASE_LLM_MODEL,
+                )
+            except Exception as e:
+                print(f"[learning_agent.finalize_planning] 계획 정보 저장 실패: {e}")
+
+            # 2) 생성된 시스템 프롬프트가 있다면 함께 저장
+            if generated_prompt:
+                try:
+                    message_manager.save_message(
+                        conversation_id=conversation_id,
+                        role="assistant",
+                        content_type="learning_stage1_generated_prompt",
+                        content=generated_prompt,
+                        llm_model=TOOL_LLM_MODEL,
+                    )
+                except Exception as e:
+                    print(f"[learning_agent.finalize_planning] 생성 프롬프트 저장 실패: {e}")
+    except Exception as e:
+        # DynamoDB 연동 오류는 학습 플로우에 영향을 주지 않도록 로그만 남김
+        print(f"[learning_agent.finalize_planning] DynamoDB 로깅 중 오류: {e}")
+
     return {
         "messages": [
             ToolMessage(
@@ -1143,7 +1181,22 @@ def execution_node(state: LearningAgentState):
             assessment_history=raw_assessment_history,
             phase_context="execution"
         )
-        
+
+        # Stage2 실행 단계 intent/assessment를 Agency 테이블에 바로 저장
+        try:
+            conversation_id = st.session_state.get("learning_conversation_id")
+            agency_manager = st.session_state.get("learning_stage2_agency_manager")
+            if conversation_id and agency_manager:
+                agency_manager.save_agency_response(
+                    conversation_id=conversation_id,
+                    output=response,
+                    intent=serialized_intent,
+                    assessment=assessment,
+                    turn=st.session_state.get("learning_turn"),
+                )
+        except Exception as e:
+            print(f"[execution_node] Stage2 Agency 로그 저장 실패: {e}")
+
         # 히스토리 업데이트
         new_intent_history = list(raw_intent_history)
         new_intent_history.append(serialized_intent)
@@ -1194,6 +1247,32 @@ def summarize_execution(state: LearningAgentState):
     summary_message = AIMessage(
         content="📊 실행 단계 대화 요약이 완료되었습니다!\n\n👈 왼쪽 사이드바에서 요약 내용을 확인해주세요!"
     )
+
+    # -------------------------------------------------
+    # DynamoDB에 실행 단계 대화 요약(summary) 내용 저장
+    # -------------------------------------------------
+    try:
+        import streamlit as st  # 이미 상단에서 import 되어 있지만, 안전 차원에서 로컬 import
+
+        conversation_id = st.session_state.get("learning_conversation_id")
+        # Stage3에서 호출되므로 우선 Stage3용 매니저를 사용, 없으면 Stage1 순으로 폴백
+        message_manager = (
+            st.session_state.get("learning_stage3_message_manager")
+            or st.session_state.get("learning_message_manager")
+        )
+
+        if conversation_id and message_manager and summary:
+            current_turn = st.session_state.get("learning_turn")
+            message_manager.save_message(
+                conversation_id=conversation_id,
+                role="assistant",
+                content_type="learning_stage3_execution_summary",
+                content=summary,
+                llm_model=TOOL_LLM_MODEL,
+                turn=current_turn,
+            )
+    except Exception as e:
+        print(f"[summarize_execution] 실행 단계 대화 요약 저장 실패: {e}")
     
     return {
         "messages": [summary_message],
@@ -1298,6 +1377,29 @@ def reflection_node(state: LearningAgentState):
 새로 배운 것: {info.get('new_learning','정보 없음')}""")
             tool_call_msg = llm_with_tools.invoke([sys] + state.get("messages", [])[-5:])
 
+            # -------------------------------------------------
+            # DynamoDB에 최종 반성 안내/정리 메시지(response) 저장
+            # -------------------------------------------------
+            try:
+                import streamlit as st
+                conversation_id = st.session_state.get("learning_conversation_id")
+                message_manager = (
+                    st.session_state.get("learning_stage3_message_manager")
+                    or st.session_state.get("learning_message_manager")
+                )
+                if conversation_id and message_manager:
+                    current_turn = st.session_state.get("learning_turn")
+                    message_manager.save_message(
+                        conversation_id=conversation_id,
+                        role="assistant",
+                        content_type="learning_stage3_reflection_complete",
+                        content=response.content,
+                        llm_model=BASE_LLM_MODEL,
+                        turn=current_turn,
+                    )
+            except Exception as e:
+                print(f"[reflection_node] 최종 반성 메시지 저장 실패: {e}")
+
             return {
                 "messages": [response, tool_call_msg],
                 "phase": "reflection",
@@ -1384,6 +1486,30 @@ def finalize_reflection(state: LearningAgentState):
         # phase_end_indices 업데이트 - 새로운 딕셔너리 생성
         existing_indices = state.get("phase_end_indices") or {}
         phase_end_indices = {**existing_indices, "reflection": current_msg_count}
+
+        # -------------------------------------------------
+        # DynamoDB에 반성 완료 안내 메시지 저장
+        # -------------------------------------------------
+        try:
+            import streamlit as st
+            conversation_id = st.session_state.get("learning_conversation_id")
+            message_manager = (
+                st.session_state.get("learning_stage3_message_manager")
+                or st.session_state.get("learning_message_manager")
+            )
+            if conversation_id and message_manager:
+                current_turn = st.session_state.get("learning_turn")
+                completion_text = "학습 반성이 완료되었습니다! 수고하셨습니다."
+                message_manager.save_message(
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content_type="learning_stage3_reflection_complete",
+                    content=completion_text,
+                    llm_model=BASE_LLM_MODEL,
+                    turn=current_turn,
+                )
+        except Exception as e:
+            print(f"⚠️ finalize_reflection DB 저장 실패: {e}")
         
         return {
             "messages": [
@@ -1434,7 +1560,30 @@ def generate_summary(state: LearningAgentState):
 - 🎯 목표 달성 여부: {reflection_info.get('goal_achievement', 'N/A')}
 - 👍 좋은 프롬프트: {reflection_info.get('best_prompt', 'N/A')}
 - 💡 새롭게 배운 것: {reflection_info.get('new_learning', 'N/A')}
-"""
+    """
+
+    # -------------------------------------------------
+    # DynamoDB에 최종 학습 과정 요약(summary_prompt) 저장
+    # -------------------------------------------------
+    try:
+        import streamlit as st
+        conversation_id = st.session_state.get("learning_conversation_id")
+        message_manager = (
+            st.session_state.get("learning_stage3_message_manager")
+            or st.session_state.get("learning_message_manager")
+        )
+        if conversation_id and message_manager:
+            current_turn = st.session_state.get("learning_turn")
+            message_manager.save_message(
+                conversation_id=conversation_id,
+                role="assistant",
+                content_type="learning_stage3_final_summary",
+                content=summary_prompt,
+                llm_model=BASE_LLM_MODEL,
+                turn=current_turn,
+            )
+    except Exception as e:
+        print(f"[generate_summary] 최종 학습 요약 저장 실패: {e}")
     
     return {
         "messages": [AIMessage(content=summary_prompt)],
@@ -1770,6 +1919,14 @@ class LearningAgentRunner:
     
     def send_message(self, user_input: str):
         """사용자 메시지 전송 및 응답 받기"""
+        # invoke 이전 상태에서 메시지 개수 기록 (AI 응답 로그용)
+        prev_snapshot = self.graph.get_state(self.config)
+        prev_count = 0
+        if prev_snapshot and prev_snapshot.values:
+            prev_messages = prev_snapshot.values.get("messages", [])
+            if isinstance(prev_messages, list):
+                prev_count = len(prev_messages)
+
         result = self.graph.invoke(
             {"messages": [HumanMessage(content=user_input)]},
             config=self.config
@@ -1779,7 +1936,10 @@ class LearningAgentRunner:
         if result:
             phase = result.get("phase", "planning")
             self.update_thread_info(st.session_state.learning_thread_id, phase=phase)
-        
+
+        # DynamoDB에 AI 응답 로그 저장
+        self._log_ai_messages_to_dynamo(prev_count)
+
         return result
     
     def get_state(self):
@@ -1913,3 +2073,64 @@ class LearningAgentRunner:
         self.graph.update_state(self.config, dummy_state, as_node="__start__")
         
         return self.get_state()
+
+    # -------------------------------------------------
+    # 내부 유틸: AI 메시지 DynamoDB 로깅
+    # -------------------------------------------------
+    def _log_ai_messages_to_dynamo(self, previous_count: int):
+        """graph.invoke 이후 추가된 AIMessage들을 DynamoDB에 저장."""
+        try:
+            conversation_id = st.session_state.get("learning_conversation_id")
+            if not conversation_id:
+                return
+
+            snapshot = self.graph.get_state(self.config)
+            if not snapshot or not snapshot.values:
+                return
+
+            messages = snapshot.values.get("messages", [])
+            if not isinstance(messages, list) or previous_count >= len(messages):
+                return
+
+            # 새로 추가된 메시지들만 확인
+            new_messages = messages[previous_count:]
+
+            # 현재 phase에 따라 사용할 메시지 매니저 및 content_type 결정
+            phase = snapshot.values.get("phase", "planning")
+            if phase == "planning":
+                message_manager = st.session_state.get("learning_message_manager")  # Stage1
+                content_type = "learning_stage1_assistant_text"
+            elif phase == "execution":
+                # Stage2는 별도 dataanalysis/agency 테이블로 로깅하므로 여기서는 추가 로깅하지 않음
+                return
+            elif phase == "reflection":
+                message_manager = st.session_state.get("learning_stage3_message_manager")  # Stage3
+                content_type = "learning_stage3_assistant_text"
+            else:
+                return
+
+            if not message_manager:
+                return
+
+            current_turn = st.session_state.get("learning_turn")
+
+            for msg in new_messages:
+                # HumanMessage는 Stage별 페이지에서 따로 로깅하므로 여기선 AI만 처리
+                if isinstance(msg, AIMessage):
+                    content = getattr(msg, "content", "") or ""
+                    if not content.strip():
+                        continue
+
+                    try:
+                        message_manager.save_message(
+                            conversation_id=conversation_id,
+                            role="assistant",
+                            content_type=content_type,
+                            content=content,
+                            llm_model=BASE_LLM_MODEL,
+                            turn=current_turn,
+                        )
+                    except Exception as e:
+                        print(f"[LearningAgentRunner] AI 메시지 로그 저장 실패: {e}")
+        except Exception as e:
+            print(f"[LearningAgentRunner] DynamoDB 로깅 중 오류: {e}")

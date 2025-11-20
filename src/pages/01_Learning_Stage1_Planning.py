@@ -14,6 +14,7 @@ from src.graph.learning_agent import LearningAgentRunner
 from src.graph.utils import get_phase_messages
 from src.graph.sidebars import render_learning_sidebar
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from src.graph.learning_logging import ensure_learning_conversation
 
 URL_PROF_IMAGE = "./data/teacher.png"
 
@@ -74,7 +75,10 @@ def main():
     
     # Runner 초기화
     agent = LearningAgentRunner()
-    
+
+    # Learning Agent용 DynamoDB 대화 세션 연결 (있으면)
+    ensure_learning_conversation()
+
     # 메인 영역: 대화 인터페이스
     state = agent.get_state()
     
@@ -164,6 +168,29 @@ def main():
                 send_button = st.button("📤 전송", type="primary", use_container_width=True)
             
             if send_button and user_input.strip():
+                # DynamoDB에 사용자 입력 로그 저장 (Stage 1 - planning)
+                try:
+                    # 턴 번호 증가
+                    if "learning_turn" not in st.session_state:
+                        st.session_state["learning_turn"] = 0
+                    st.session_state["learning_turn"] += 1
+                    current_turn = st.session_state["learning_turn"]
+
+                    conversation_id = st.session_state.get("learning_conversation_id")
+                    message_manager = st.session_state.get("learning_message_manager")
+                    if conversation_id and message_manager:
+                        message_manager.save_message(
+                            conversation_id=conversation_id,
+                            role="user",
+                            content_type="learning_stage1_user_text",
+                            content=user_input,
+                            llm_model=None,
+                            turn=current_turn,
+                        )
+                except Exception as e:
+                    # 로깅 실패는 앱 흐름에 영향을 주지 않음
+                    print(f"[Stage1] 사용자 입력 로그 저장 실패: {e}")
+
                 with st.spinner("응답 생성 중..."):
                     result = agent.send_message(user_input)
                 st.rerun()

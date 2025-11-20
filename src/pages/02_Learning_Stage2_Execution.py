@@ -32,6 +32,7 @@ from src.graph.learning_agent import LearningAgentRunner
 from src.graph.sidebars import render_learning_sidebar
 from src.graph.utils import get_phase_messages, get_thread_specific_key
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from src.graph.learning_logging import ensure_learning_conversation
 
 from src.components.dynamo import (
     DynamoDBManager,
@@ -66,9 +67,9 @@ AWS_SECRET_ACCESS_KEY = st.secrets.get("AWS_SECRET_ACCESS_KEY")
 AWS_S3_BUCKET_NAME = st.secrets.get("AWS_S3_BUCKET_NAME")
 AWS_REGION = st.secrets.get("AWS_REGION", "ap-northeast-2")
 
-CONVERSATIONS_ANALYSIS_TABLE = "chatbot_conversations_dataanalysis"
-MESSAGES_ANALYSIS_TABLE = "chatbot_messages_dataanalysis"
-AGENCY_ANALYSIS_TABLE = "agency_messages_dataanalysis"
+CONVERSATIONS_ANALYSIS_TABLE = "learning_conversations"
+MESSAGES_ANALYSIS_TABLE = "learning_stage2_dataanalysis"  # Stage2 CSV Agent 전용 메시지 테이블
+AGENCY_ANALYSIS_TABLE = "learning_stage2_agency_messages"  # Stage2 Agency Agent 전용 메시지 테이블
 
 URL_PROF_IMAGE = "./data/teacher.png"
 
@@ -115,8 +116,11 @@ def init_managers():
         st.error(f"매니저 초기화 실패: {e}")
         return None, None, None, None, None
 
-
 dynamo_manager, s3_manager, conversation_manager, message_manager, agency_conversation_manager = init_managers()
+
+# Stage2 실행 단계에서 사용할 Agency 매니저를 LangGraph에서도 접근할 수 있도록 세션에 저장
+if agency_conversation_manager:
+    st.session_state["learning_stage2_agency_manager"] = agency_conversation_manager
 
 # ============================================================
 # Streamlit Session State (CSV Agent용)
@@ -204,12 +208,16 @@ def add_message_main(role: MessageRole, content: List[Union[MessageType, str]]):
                     "model_option_general", "gpt-4.1-mini"
                 )
 
+            # Stage2 학습 턴 번호를 함께 저장 (learning_stage2_dataanalysis 테이블용)
+            current_turn = st.session_state.get("learning_turn")
+
             message_manager.save_message(
                 st.session_state.get("conversation_id"),
                 role,
                 db_content_type,
                 db_content,
                 llm_model,
+                turn=current_turn,
             )
 
     # 세션 상태에는 원본 객체 그대로 저장
@@ -252,24 +260,29 @@ def save_agency_response(output: str, intent: str, assessment: str, conversation
     conv_id = conversation_id or st.session_state.get("conversation_id")
     if conv_id and agency_conversation_manager:
         try:
+            current_turn = st.session_state.get("learning_turn")
             agency_conversation_manager.save_agency_response(
                 conv_id,
                 output,
                 intent,
                 assessment,
+                turn=current_turn,
             )
         except Exception as e:
             print(f"Agency 응답 저장 중 오류: {e}")
 
 
 def save_user_input_to_agency(user_input: str):
-    """사용자 입력을 agency_conversations 테이블에 저장"""
-    conv_id = st.session_state.get("conversation_id")
+    """사용자 입력을 Stage2 Agency 테이블(learning_stage2_agency_messages)에 저장"""
+    # Learning Agent용 대화 ID를 사용하여 Stage1/2/3 로그와 일관되게 관리
+    conv_id = st.session_state.get("learning_conversation_id")
     if conv_id and agency_conversation_manager:
         try:
+            current_turn = st.session_state.get("learning_turn")
             agency_conversation_manager.save_user_input(
                 conv_id,
                 user_input,
+                turn=current_turn,
             )
         except Exception:
             # 사용자 경험에 영향을 주지 않도록 조용히 무시
@@ -434,6 +447,7 @@ def thread_safe_learning_tutor(
     """
     메인 입력 query를 LearningAgent(LangGraph)에 전달하고
     사이드바 튜터 조언을 sidebar_queue로 전달
+    (intent/assessment 저장은 learning_agent.execution_node에서 수행)
     """
     try:
         # 먼저 사용자 발화를 사이드바 큐에 전달
@@ -462,12 +476,6 @@ def thread_safe_learning_tutor(
         if advice_text:
             # 사이드바에 한 번에 표시 (필요시 chunking 가능)
             sidebar_queue.put(("TEXT", advice_text))
-            save_agency_response(
-                advice_text,
-                intent="execution_advice",
-                assessment="N/A",
-                conversation_id=conversation_id,
-            )
 
         sidebar_queue.put(None)
 
@@ -942,12 +950,24 @@ def render_csv_agent_execution_ui(learning_agent: LearningAgentRunner):
         user_input = st.chat_input("데이터에 질문해보세요!")
 
         if user_input:
+            # 1) Learning Agent Stage2용 턴 증가 + user 텍스트 로그
+            try:
+                if "learning_turn" not in st.session_state:
+                    st.session_state["learning_turn"] = 0
+                st.session_state["learning_turn"] += 1
+                current_turn = st.session_state["learning_turn"]
+
+            except Exception as e:
+                print(f"[Stage2] LearningAgent 사용자 입력 로그 저장 실패: {e}")
+
+            # 2) CSV Agent UI + 로그 (learning_turn이 증가된 상태에서 turn을 함께 저장)
             st.chat_message("user").write(user_input)
             add_message_main(MessageRole.USER, [MessageType.TEXT, user_input])
 
-            # Agency DB에 사용자 입력 저장
+            # 3) Agency DB에 사용자 입력 저장
             save_user_input_to_agency(user_input)
 
+            # 4) CSV Agent + LearningAgent 병렬 실행
             session_state_proxy = {
                 "model_option_general": st.session_state.get("model_option_general"),
                 "last_result_df": st.session_state.get("last_result_df"),
@@ -1021,7 +1041,10 @@ def main():
     
     # Runner 초기화
     agent = LearningAgentRunner()
-    
+
+    # Learning Agent 공통 Conversation 보장
+    ensure_learning_conversation()
+
     # 메인 영역
     state = agent.get_state()
     

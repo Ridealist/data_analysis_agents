@@ -14,6 +14,7 @@ from src.graph.learning_agent import LearningAgentRunner, generate_summary
 from src.graph.sidebars import render_learning_sidebar
 from src.graph.utils import get_phase_messages
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage, SystemMessage
+from src.graph.learning_logging import ensure_learning_conversation, init_learning_stage3_managers
 
 URL_PROF_IMAGE = "./data/teacher.png"
 
@@ -60,6 +61,14 @@ def main():
     
     # Runner 초기화
     agent = LearningAgentRunner()
+
+    # 공통 Conversation 보장
+    ensure_learning_conversation()
+
+    # Stage3(Reflection)용 메시지 매니저 초기화
+    _, _, stage3_message_manager = init_learning_stage3_managers()
+    if stage3_message_manager:
+        st.session_state["learning_stage3_message_manager"] = stage3_message_manager
     
     # 사이드바 렌더링
     render_learning_sidebar(agent, current_page="stage3")
@@ -195,6 +204,30 @@ def main():
                 send_button = st.button("📤 전송", type="primary", use_container_width=True)
             
             if send_button and user_input.strip():
+                # 1) 턴 번호 증가 (Stage1/2와 공통 카운터)
+                if "learning_turn" not in st.session_state:
+                    st.session_state["learning_turn"] = 0
+                st.session_state["learning_turn"] += 1
+                current_turn = st.session_state["learning_turn"]
+
+                # 2) Stage3 user 메시지 DynamoDB 저장
+                try:
+                    conversation_id = st.session_state.get("learning_conversation_id")
+                    stage3_msg_manager = st.session_state.get("learning_stage3_message_manager")
+
+                    if conversation_id and stage3_msg_manager:
+                        stage3_msg_manager.save_message(
+                            conversation_id=conversation_id,
+                            role="user",
+                            content_type="learning_stage3_user_text",
+                            content=user_input,
+                            llm_model=None,
+                            turn=current_turn,
+                        )
+                except Exception as e:
+                    print(f"[Stage3] LearningAgent 사용자 입력 로그 저장 실패: {e}")
+
+                # 3) 기존 LearningAgent 호출
                 with st.spinner("응답 생성 중..."):
                     result = agent.send_message(user_input)
                 st.rerun()
