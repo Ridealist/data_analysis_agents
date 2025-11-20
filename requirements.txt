@@ -16,11 +16,11 @@ boto3
 
 langchain_teddynote
 langchain_experimental
-langchain_openai
-langchain
-langchain_community
-langchain_core
-langchain_text_splitters
+langchain_openai==0.2.14
+langchain==0.3.26
+langchain_community==0.3.27
+langchain_core==0.3.68
+langchain_text_splitters==0.3.8
 
-langgraph
-langgraph-checkpoint-sqlite
+langgraph==0.5.3
+langgraph-checkpoint-sqlite==2.0.11
