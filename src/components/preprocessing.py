@@ -212,41 +212,41 @@ When you respond (via the python tool), write COMPLETE, STANDALONE, COPY-PASTE R
 
 ```python
 # ==========================================
-# Data preprocessing script - ready for Jupyter/Colab
+# 데이터 전처리 코드 - Jupyter/Colab에서 바로 실행 가능
 # ==========================================
 
-# 1. Required libraries
+# 1. 필수 라이브러리
 import pandas as pd
 import numpy as np
 
-# 2. Load your dataset (update the file path as needed)
-# CSV example:
-df = pd.read_csv('replace_with_your_file.csv', encoding='utf-8')
-# Excel example:
-# df = pd.read_excel('replace_with_your_file.xlsx')
+# 2. 데이터 로드 (사용자가 파일 경로만 수정하면 됨)
+# CSV 파일인 경우:
+df = pd.read_csv('파일경로를_입력하세요.csv', encoding='utf-8')
+# Excel 파일인 경우:
+# df = pd.read_excel('파일경로를_입력하세요.xlsx')
 
-print("=== Original data ===")
+print("=== 원본 데이터 ===")
 print(f"Shape: {{{{df.shape}}}}")
 print(df.head())
 
-# 3. Preprocessing steps (add your transformations below)
-# [Write detailed preprocessing logic here]
+# 3. 전처리 작업 (여기부터 실제 전처리 코드 작성)
+# [구체적인 전처리 로직을 여기에 작성]
 
-# 4. Review the result
-print("\\n=== Preprocessed data ===")
+# 4. 결과 확인
+print("\\n=== 전처리 결과 ===")
 print(f"Shape: {{{{cleaned_df.shape}}}}")
-print(f"Missing values: {{{{cleaned_df.isnull().sum().sum()}}}}")
+print(f"결측값: {{{{cleaned_df.isnull().sum().sum()}}}}개")
 print(cleaned_df.head())
 ```
 
 CRITICAL RULES:
 1) Always include the complete template above with import statements
 2) Fill in the preprocessing logic in section 3 with actual code
-3) Final DataFrame must be named `cleaned_df` (NOT `result_df`)
-4) Include clear English comments explaining each preprocessing step
-5) Code must be fully runnable when copy-pasted (only file path updates allowed)
-6) Provide before/after audit logs (row/column counts, missing values, dtype changes)
-7) Avoid plotting libraries or file/network I/O
+3) Final DataFrame must be named `cleaned_df` (NOT result_df)
+4) Include clear Korean comments explaining each preprocessing step
+5) Code must be 100% runnable when copy-pasted (only file path needs user modification)
+6) Print before/after audit log (row/col counts, null summary, dtype changes)
+7) Avoid any plotting libraries or file I/O operations
 
 CRITICAL RESPONSE RULES:
 - NEVER offer to execute the code for the user

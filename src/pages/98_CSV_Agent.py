@@ -48,7 +48,11 @@ os.environ["LANGCHAIN_TRACING_V2"] = st.secrets["LANGCHAIN_TRACING_V2"]
 os.environ["LANGCHAIN_API_KEY"] = st.secrets["LANGCHAIN_API_KEY"]
 os.environ["LANGCHAIN_ENDPOINT"] = st.secrets["LANGCHAIN_ENDPOINT"]
 os.environ["LANGCHAIN_PROJECT"] = st.secrets["LANGCHAIN_PROJECT"]
+<<<<<<<< HEAD:src/pages/98_CSV_Agent.py
 # logging.langsmith("Agent 챗봇 1차 현장적용[수원외고] 0828")
+========
+logging.langsmith("Agent 챗봇 2차 현장적용[수원외고] 1030")
+>>>>>>>> main:src/pages/02_Analy_Agent.py
 
 # --- 데이터베이스 설정 ---
 AWS_ACCESS_KEY_ID = st.secrets.get("AWS_ACCESS_KEY_ID")
@@ -119,6 +123,7 @@ def thread_safe_ask(query: str, agent, python_tool, main_queue: Queue, error_que
                                 except Exception as e:
                                     error_msg = f"시각화 처리 중 오류 발생: {str(e)}"
                                     main_queue.put(("ERROR", error_msg))
+                                    print(f"[thread_safe_ask:visualization] {e}")  # 디버깅용
                 
                 # DataFrame 결과 처리
                 if session_state_proxy.get('last_result_df') is not None:
@@ -133,18 +138,24 @@ def thread_safe_ask(query: str, agent, python_tool, main_queue: Queue, error_que
             
             # Agent 실행 후 result_df와 figure 체크
             # python_tool.locals에서 직접 확인
-            if 'result_df' in python_tool.locals:
-                result_df = python_tool.locals['result_df']
-                if isinstance(result_df, (pd.DataFrame, pd.Series)):
-                    main_queue.put(("DATAFRAME", result_df))
-                    del python_tool.locals['result_df']  # 중복 방지를 위해 삭제
+            try:
+                if 'result_df' in python_tool.locals:
+                    result_df = python_tool.locals['result_df']
+                    if isinstance(result_df, (pd.DataFrame, pd.Series)):
+                        main_queue.put(("DATAFRAME", result_df))
+                        del python_tool.locals['result_df']  # 중복 방지를 위해 삭제
+            except Exception as e:
+                print(f"[thread_safe_ask:result_df] {e}")
             
             # matplotlib의 현재 figure 확인
-            import matplotlib.pyplot as plt
-            if plt.get_fignums():  # 열려있는 figure가 있는지 확인
-                fig = plt.gcf()
-                if fig and fig.get_axes():
-                    main_queue.put(("FIGURE", fig))
+            try:
+                import matplotlib.pyplot as plt
+                if plt.get_fignums():  # 열려있는 figure가 있는지 확인
+                    fig = plt.gcf()
+                    if fig and fig.get_axes():
+                        main_queue.put(("FIGURE", fig))
+            except Exception as e:
+                print(f"[thread_safe_ask:figure] {e}")
                     
         except OpenAIError as e:
             success, new_model, error_msg = handle_openai_error(e, session_state_proxy.get("model_option_general"))
@@ -159,6 +170,7 @@ def thread_safe_ask(query: str, agent, python_tool, main_queue: Queue, error_que
                 
         except Exception as e:
             error_queue.put(("GENERAL_ERROR", str(e)))
+            print(f"[thread_safe_ask] {e}")  # 디버깅용
         
         # 최종 텍스트 수집 및 전송
         final_text = ""
@@ -174,6 +186,7 @@ def thread_safe_ask(query: str, agent, python_tool, main_queue: Queue, error_que
         
     except Exception as e:
         error_queue.put(("CRITICAL_ERROR", str(e)))
+        print(f"[thread_safe_ask:critical] {e}")  # 디버깅용
         main_queue.put(None)
 
 
@@ -337,49 +350,54 @@ def update_ui_from_queues(main_queue: Queue, sidebar_queue: Queue, error_queue: 
                 else:
                     msg_type, content = item
                     
-                    with main_container:
-                        if msg_type == "USER_MESSAGE":
-                            # 사용자 메시지는 이미 표시됨
-                            pass
+                    try:
+                        with main_container:
+                            if msg_type == "USER_MESSAGE":
+                                # 사용자 메시지는 이미 표시됨
+                                pass
+                                
+                            elif msg_type == "CODE":
+                                with st.status("🔍 실행된 코드 보기", expanded=False):
+                                    st.code(content, language="python")
+                                add_message_main(MessageRole.ASSISTANT, [MessageType.CODE, content])
                             
-                        elif msg_type == "CODE":
-                            with st.status("🔍 실행된 코드 보기", expanded=False):
-                                st.code(content, language="python")
-                            add_message_main(MessageRole.ASSISTANT, [MessageType.CODE, content])
-                        
-                        elif msg_type == "DATAFRAME":
-                            st.dataframe(content, use_container_width=True)
-                            add_message_main(MessageRole.ASSISTANT, [MessageType.DATAFRAME, content])
-                        
-                        elif msg_type == "FIGURE":
-                            st.pyplot(content)
-                            add_message_main(MessageRole.ASSISTANT, [MessageType.FIGURE, content])
-                            plt.close(content)
-                        
-                        elif msg_type == "TEXT_CHUNK":
-                            main_text_buffer += content
-                            if main_text_placeholder is None:
-                                main_text_placeholder = st.empty()
-                            main_text_placeholder.markdown(main_text_buffer)
-                        
-                        elif msg_type == "FINAL_TEXT":
-                            if main_text_placeholder is None:
-                                main_text_placeholder = st.empty()
-                            main_text_placeholder.markdown(content)
-                            main_text_buffer = content
-                        
-                        elif msg_type == "DATAFRAME_FINAL":
-                            st.dataframe(content, use_container_width=True)
-                            add_message_main(MessageRole.ASSISTANT, [MessageType.DATAFRAME, content])
-                            # 세션 상태에 저장
-                            st.session_state['last_result_df'] = content
-                        
-                        elif msg_type == "FIGURE_FINAL":
-                            st.pyplot(content)
-                            add_message_main(MessageRole.ASSISTANT, [MessageType.FIGURE, content])
-                            plt.close(content)
-                            # 세션 상태에 저장
-                            st.session_state['last_figure'] = content
+                            elif msg_type == "DATAFRAME":
+                                st.dataframe(content, use_container_width=True)
+                                add_message_main(MessageRole.ASSISTANT, [MessageType.DATAFRAME, content])
+                            
+                            elif msg_type == "FIGURE":
+                                st.pyplot(content)
+                                add_message_main(MessageRole.ASSISTANT, [MessageType.FIGURE, content])
+                                plt.close(content)
+                            
+                            elif msg_type == "TEXT_CHUNK":
+                                main_text_buffer += content
+                                if main_text_placeholder is None:
+                                    main_text_placeholder = st.empty()
+                                main_text_placeholder.markdown(main_text_buffer)
+                            
+                            elif msg_type == "FINAL_TEXT":
+                                if main_text_placeholder is None:
+                                    main_text_placeholder = st.empty()
+                                main_text_placeholder.markdown(content)
+                                main_text_buffer = content
+                            
+                            elif msg_type == "DATAFRAME_FINAL":
+                                st.dataframe(content, use_container_width=True)
+                                add_message_main(MessageRole.ASSISTANT, [MessageType.DATAFRAME, content])
+                                # 세션 상태에 저장
+                                st.session_state['last_result_df'] = content
+                            
+                            elif msg_type == "FIGURE_FINAL":
+                                st.pyplot(content)
+                                add_message_main(MessageRole.ASSISTANT, [MessageType.FIGURE, content])
+                                plt.close(content)
+                                # 세션 상태에 저장
+                                st.session_state['last_figure'] = content
+                    
+                    except Exception as msg_error:
+                        # 개별 메시지 처리 실패해도 다음 메시지는 처리
+                        print(f"[update_ui_from_queues:message] {msg_type} 처리 실패: {msg_error}")
                             
             except Empty:
                 pass
@@ -520,56 +538,60 @@ def add_message_main(role: MessageRole, content: List[Union[MessageType, str]]):
     
     # S3 업로드 및 DB 저장 처리
     if st.session_state.conversation_id:
-        if message_type == MessageType.DATAFRAME and isinstance(message_content, (pd.DataFrame, pd.Series)):
-            # DataFrame을 S3에 업로드
-            s3_path = s3_manager.upload_to_s3(
-                message_content, 
-                'dataframe', 
-                st.session_state.get("conversation_id")
-            )
-            if s3_path:
-                db_content_type = 'dataframe_s3'
-                db_content = s3_path
-                # DB에만 S3 경로 저장, 세션에는 원본 객체 유지
-        
-        elif message_type == MessageType.FIGURE and hasattr(message_content, 'savefig'):
-            # Figure를 S3에 업로드
-            s3_path = s3_manager.upload_to_s3(
-                message_content,
-                'figure',
-                st.session_state.get("conversation_id")
-            )
-            if s3_path:
-                db_content_type = 'figure_s3'
-                db_content = s3_path
-                # DB에만 S3 경로 저장, 세션에는 원본 객체 유지
-        
-        elif message_type == MessageType.TEXT:
-            db_content_type = 'text'
-            db_content = message_content
-        
-        elif message_type == MessageType.CODE:
-            db_content_type = 'code'
-            db_content = message_content
-        
-        elif message_type == MessageType.ERROR:
-            db_content_type = 'error'
-            db_content = message_content
-        
-        # DB에 저장
-        if db_content_type and db_content:
-            # AI 답변인 경우 모델 정보도 함께 저장
-            llm_model = None
-            if role == MessageRole.ASSISTANT:
-                llm_model = st.session_state.get("model_option_general", "gpt-4.1-mini")
+        try:
+            if message_type == MessageType.DATAFRAME and isinstance(message_content, (pd.DataFrame, pd.Series)):
+                # DataFrame을 S3에 업로드
+                s3_path = s3_manager.upload_to_s3(
+                    message_content, 
+                    'dataframe', 
+                    st.session_state.get("conversation_id")
+                )
+                if s3_path:
+                    db_content_type = 'dataframe_s3'
+                    db_content = s3_path
+                    # DB에만 S3 경로 저장, 세션에는 원본 객체 유지
             
-            message_manager.save_message(
-                st.session_state.get("conversation_id"),
-                role,
-                db_content_type,
-                db_content,
-                llm_model
-            )
+            elif message_type == MessageType.FIGURE and hasattr(message_content, 'savefig'):
+                # Figure를 S3에 업로드
+                s3_path = s3_manager.upload_to_s3(
+                    message_content,
+                    'figure',
+                    st.session_state.get("conversation_id")
+                )
+                if s3_path:
+                    db_content_type = 'figure_s3'
+                    db_content = s3_path
+                    # DB에만 S3 경로 저장, 세션에는 원본 객체 유지
+            
+            elif message_type == MessageType.TEXT:
+                db_content_type = 'text'
+                db_content = message_content
+            
+            elif message_type == MessageType.CODE:
+                db_content_type = 'code'
+                db_content = message_content
+            
+            elif message_type == MessageType.ERROR:
+                db_content_type = 'error'
+                db_content = message_content
+            
+            # DB에 저장
+            if db_content_type and db_content:
+                # AI 답변인 경우 모델 정보도 함께 저장
+                llm_model = None
+                if role == MessageRole.ASSISTANT:
+                    llm_model = st.session_state.get("model_option_general", "gpt-4.1-mini")
+                
+                message_manager.save_message(
+                    st.session_state.get("conversation_id"),
+                    role,
+                    db_content_type,
+                    db_content,
+                    llm_model
+                )
+        except Exception as e:
+            # DB/S3 저장 실패해도 로컬 세션에는 저장
+            print(f"[add_message_main] DB/S3 저장 실패: {e}")
     
     # 세션 상태에는 원본 객체 그대로 저장 (S3 경로가 아닌)
     messages = st.session_state["messages_UploadData"]
@@ -948,11 +970,29 @@ if st.session_state["logged_in"]:
     #-------메인 로직 설정 ----------#
     # CSV 파일 업로드 섹션
     with st.expander("📁 데이터 업로드", expanded=True):
-        uploaded_file = st.file_uploader("CSV 파일을 업로드해주세요", type=["csv"], help="분석할 데이터를 CSV 형식으로 업로드해주세요.")
+        uploaded_file = st.file_uploader(
+            "데이터 파일을 업로드해주세요", 
+            type=["csv", "xlsx", "xls", "tsv", "txt"], 
+            help="분석할 데이터를 업로드해주세요. (지원 형식: CSV, Excel, TSV/TXT)"
+        )
 
         if uploaded_file is not None:
             try:
-                dataframe = pd.read_csv(uploaded_file)
+                # 파일 확장자에 따라 적절한 pandas 함수 사용
+                file_extension = uploaded_file.name.split('.')[-1].lower()
+                
+                if file_extension == 'csv':
+                    dataframe = pd.read_csv(uploaded_file)
+                elif file_extension in ['xlsx', 'xls']:
+                    # .xls와 .xlsx를 구분하여 적절한 엔진 사용
+                    if file_extension == 'xls':
+                        dataframe = pd.read_excel(uploaded_file, engine='xlrd')
+                    else:  # xlsx
+                        dataframe = pd.read_excel(uploaded_file, engine='openpyxl')
+                elif file_extension in ['tsv', 'txt']:
+                    dataframe = pd.read_csv(uploaded_file, sep='\t')
+                else:
+                    raise ValueError(f"지원하지 않는 파일 형식입니다: {file_extension}")
                 
                 # 데이터프레임 유효성 검사
                 if dataframe.empty or len(dataframe.columns) == 0:
@@ -1165,87 +1205,94 @@ if st.session_state["logged_in"]:
         user_input = st.chat_input("데이터에 질문해보세요!")  # 사용자 입력 받기
 
         if user_input:
-            # 사용자 메시지 표시
-            st.chat_message("user").write(user_input)
-            add_message_main(MessageRole.USER, [MessageType.TEXT, user_input])
+            try:
+                # 사용자 메시지 표시
+                st.chat_message("user").write(user_input)
+                add_message_main(MessageRole.USER, [MessageType.TEXT, user_input])
 
-            # Agency 테이블에 사용자 입력 저장
-            save_user_input_to_agency(user_input)
+                # Agency 테이블에 사용자 입력 저장
+                save_user_input_to_agency(user_input)
 
-            # 사이드바 대화 기록에서 'user'의 메시지 추가
-            st.session_state["messages_sidebar_UploadData"].append({
-                "role": "user",
-                "content": user_input
-            })
-            
-            # Thinking chain 생성
-            thinking_chain = create_thinking_chain(st.session_state.get("openai_api_key"))
-            
-            # 세션 상태 프록시 생성
-            session_state_proxy = {
-                "model_option_general": st.session_state.get("model_option_general"),
-                "last_result_df": st.session_state.get('last_result_df'),
-                "last_figure": st.session_state.get('last_figure')
-            }
-
-            with st.spinner("AI가 생각하고 있습니다..."):
-
-                # 사이드바 완전 초기화 - 이전 표시 내용 모두 제거
-                thinking_container.empty()
-
-                # 새로운 고정 placeholder 생성
-                with thinking_container:
-                    st.session_state["thinking_placeholder"] = st.empty()
-
-                # 병렬 실행
-                main_queue, sidebar_queue, error_queue = parallel_execution_manager(
-                    user_input,
-                    st.session_state["agent_with_UploadData"],
-                    st.session_state["python_tool"],
-                    thinking_chain,
-                    add_message_main,
-                    session_state_proxy
-                )
-            
-                # 응답 컨테이너 생성
-                with st.chat_message("assistant"):
-                    main_container = st.container()
+                # 사이드바 대화 기록에서 'user'의 메시지 추가
+                st.session_state["messages_sidebar_UploadData"].append({
+                    "role": "user",
+                    "content": user_input
+                })
                 
-                # 사이드바 컨테이너 초기화 (이전 내용 지우기)
-                thinking_container.empty()
-                with thinking_container:
-                    sidebar_container = st.container()
+                # Thinking chain 생성
+                thinking_chain = create_thinking_chain(st.session_state.get("openai_api_key"))
                 
-                # UI 업데이트 (메인 스레드에서 실행)
-                update_ui_from_queues(
-                    main_queue,
-                    sidebar_queue,
-                    error_queue,
-                    main_container,
-                    sidebar_container,
-                    add_message_main
-                )
+                # 세션 상태 프록시 생성
+                session_state_proxy = {
+                    "model_option_general": st.session_state.get("model_option_general"),
+                    "last_result_df": st.session_state.get('last_result_df'),
+                    "last_figure": st.session_state.get('last_figure')
+                }
 
-            # Agent 실행 완료 후 세션 상태에서 결과 확인 (메인 스레드에서)
-            with main_container:
-                # DataFrame 확인
-                if st.session_state.get('last_result_df') is not None:
-                    result_df = st.session_state['last_result_df']
-                    if isinstance(result_df, (pd.DataFrame, pd.Series)):
-                        st.dataframe(result_df, use_container_width=True)
-                        add_message_main(MessageRole.ASSISTANT, [MessageType.DATAFRAME, result_df])
-                        st.session_state['last_result_df'] = None
+                with st.spinner("AI가 생각하고 있습니다..."):
+
+                    # 사이드바 완전 초기화 - 이전 표시 내용 모두 제거
+                    thinking_container.empty()
+
+                    # 새로운 고정 placeholder 생성
+                    with thinking_container:
+                        st.session_state["thinking_placeholder"] = st.empty()
+
+                    # 병렬 실행
+                    main_queue, sidebar_queue, error_queue = parallel_execution_manager(
+                        user_input,
+                        st.session_state["agent_with_UploadData"],
+                        st.session_state["python_tool"],
+                        thinking_chain,
+                        add_message_main,
+                        session_state_proxy
+                    )
                 
-                # Figure 확인
-                if st.session_state.get('last_figure') is not None:
-                    fig = st.session_state['last_figure']
-                    if isinstance(fig, plt.Figure):
-                        st.pyplot(fig)
-                        add_message_main(MessageRole.ASSISTANT, [MessageType.FIGURE, fig])
-                        plt.close(fig)
-                        st.session_state['last_figure'] = None
+                    # 응답 컨테이너 생성
+                    with st.chat_message("assistant"):
+                        main_container = st.container()
+                    
+                    # 사이드바 컨테이너 초기화 (이전 내용 지우기)
+                    thinking_container.empty()
+                    with thinking_container:
+                        sidebar_container = st.container()
+                    
+                    # UI 업데이트 (메인 스레드에서 실행)
+                    update_ui_from_queues(
+                        main_queue,
+                        sidebar_queue,
+                        error_queue,
+                        main_container,
+                        sidebar_container,
+                        add_message_main
+                    )
 
-            st.success("✅ 분석 완료!")
+                # Agent 실행 완료 후 세션 상태에서 결과 확인 (메인 스레드에서)
+                with main_container:
+                    # DataFrame 확인
+                    if st.session_state.get('last_result_df') is not None:
+                        result_df = st.session_state['last_result_df']
+                        if isinstance(result_df, (pd.DataFrame, pd.Series)):
+                            st.dataframe(result_df, use_container_width=True)
+                            add_message_main(MessageRole.ASSISTANT, [MessageType.DATAFRAME, result_df])
+                            st.session_state['last_result_df'] = None
+                    
+                    # Figure 확인
+                    if st.session_state.get('last_figure') is not None:
+                        fig = st.session_state['last_figure']
+                        if isinstance(fig, plt.Figure):
+                            st.pyplot(fig)
+                            add_message_main(MessageRole.ASSISTANT, [MessageType.FIGURE, fig])
+                            plt.close(fig)
+                            st.session_state['last_figure'] = None
+
+                st.success("✅ 분석 완료!")
+            
+            except Exception as e:
+                # 최상위 예외 처리 - Streamlit 앱 크래시 방지
+                st.error(f"❌ 분석 중 오류가 발생했습니다: {str(e)}")
+                print(f"[main_execution_error] {e}")
+                # 에러 발생해도 사용자는 계속 질문 가능
 
 else:
     st.error("먼저 로그인을 해주세요!")
