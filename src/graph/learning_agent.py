@@ -1870,8 +1870,13 @@ class LearningAgentRunner:
                 print(f"[LearningAgentRunner] 초기 thread 동기화 실패: {e}")
         
         # 현재 스레드 초기화
+        thread_list = st.session_state.get("learning_thread_list", [])
         if "learning_thread_id" not in st.session_state:
-            self.create_new_thread()
+            # 기존 세션이 있으면 가장 최근 세션을 기본 선택, 없으면 새 세션 생성
+            if thread_list:
+                st.session_state.learning_thread_id = thread_list[0]["id"]
+            else:
+                self.create_new_thread()
         
         self.config = {
             "configurable": {"thread_id": st.session_state.learning_thread_id}
@@ -1944,10 +1949,14 @@ class LearningAgentRunner:
             "configurable": {"thread_id": thread_id}
         }
 
+        # �� 기존 conversation 매핑 초기화 (새 thread용으로 다시 맵핑하기 위함)
+        st.session_state.pop("learning_conversation_id", None)
+        st.session_state.pop("learning_message_manager", None)
+        st.session_state.pop("learning_conversation_created_at", None)
+
         # 해당 thread_id용 DynamoDB conversation 보장
         try:
             from src.graph.learning_logging import ensure_learning_conversation
-
             ensure_learning_conversation()
         except Exception as e:
             print(f"[LearningAgentRunner] switch_thread ensure_learning_conversation 실패: {e}")
@@ -1958,6 +1967,23 @@ class LearningAgentRunner:
             if thread["id"] == thread_id:
                 thread.update(kwargs)
                 break
+
+        # phase 변경이 있으면 DynamoDB learning_conversations.phase 도 동기화
+        phase = kwargs.get("phase")
+        if phase:
+            try:
+                from src.graph.learning_logging import init_learning_managers
+
+                _, conversation_manager, _ = init_learning_managers()
+                conversation_id = st.session_state.get("learning_conversation_id")
+                if conversation_id and conversation_manager:
+                    conversation_manager.conversations_table.update_item(
+                        Key={"session_uuid": conversation_id},
+                        UpdateExpression="SET phase = :phase",
+                        ExpressionAttributeValues={":phase": phase},
+                    )
+            except Exception as e:
+                print(f"[LearningAgentRunner] phase 동기화 실패: {e}")
     
     def get_thread_info(self, thread_id: str):
         """스레드 정보 조회"""

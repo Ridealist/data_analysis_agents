@@ -151,7 +151,7 @@ def render_execution_sidebar_chat(agent: LearningAgentRunner, state):
         st.info("'Stage 3: 반성'으로 이동하세요")
     else:
         # 안내 및 완료 버튼
-        st.info("💡 메인 화면에서 질문하면, 위 대화 영역에 튜터의 조언이 자동으로 표시됩니다.")
+        st.info("💡 메인 화면에서 질문하면, 위 대화 영역에 AI 에이전트의 조언이 자동으로 표시됩니다.")
         
         complete_btn = st.button("✅ 실행 단계 완료", key="execution_sidebar_complete", use_container_width=True, type='primary')
         if complete_btn:

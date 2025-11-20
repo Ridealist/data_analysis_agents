@@ -45,6 +45,7 @@ from src.components.dataclass import MessageRole, MessageType
 from src.components.llm import set_openai_api_key, handle_openai_error
 from src.prompts.agent_prompts import AGENT_PREFIX_PROMPT, AGENT_POSTFIX_PROMPT
 from src.utils.dataframe_handler import safe_dataframe_display
+from src.components.sidebar import load_messages_from_db
 
 warnings.filterwarnings("ignore")
 
@@ -59,7 +60,6 @@ os.environ["LANGCHAIN_TRACING_V2"] = st.secrets.get("LANGCHAIN_TRACING_V2", "")
 os.environ["LANGCHAIN_API_KEY"] = st.secrets.get("LANGCHAIN_API_KEY", "")
 os.environ["LANGCHAIN_ENDPOINT"] = st.secrets.get("LANGCHAIN_ENDPOINT", "")
 os.environ["LANGCHAIN_PROJECT"] = st.secrets.get("LANGCHAIN_PROJECT", "")
-logging.langsmith("Agent 챗봇 1차 현장적용[수원외고] 0828")
 
 # AWS / Dynamo / S3 설정
 AWS_ACCESS_KEY_ID = st.secrets.get("AWS_ACCESS_KEY_ID")
@@ -149,6 +149,34 @@ if "last_result_df" not in st.session_state:
 
 if "last_figure" not in st.session_state:
     st.session_state["last_figure"] = None
+
+
+# ============================================================
+# Stage2 CSV 히스토리 로딩 헬퍼
+# ============================================================
+
+
+def load_stage2_csv_history_from_db(conversation_id: str) -> bool:
+    """
+    learning_stage2_dataanalysis 테이블에서 지정된 conversation_id의
+    CSV Agent 대화 히스토리를 불러와 messages_UploadData 등에 복원.
+    """
+    if not conversation_id:
+        return False
+    if not message_manager or not s3_manager:
+        return False
+
+    try:
+        # sidebar.load_messages_from_db를 재사용
+        return load_messages_from_db(
+            conversation_id,
+            message_manager,
+            s3_manager,
+            MESSAGES_ANALYSIS_TABLE,
+        )
+    except Exception as e:
+        print(f"[Stage2] CSV 히스토리 로딩 실패: {e}")
+        return False
 
 # ============================================================
 # 메시지 관련 함수 (CSV Agent용)
@@ -841,8 +869,14 @@ def render_csv_agent_execution_ui(learning_agent: LearningAgentRunner):
             if conversation_manager:
                 user_id = st.session_state.get("username", "anonymous")
 
+                # LearningAgent의 learning_conversation_id를 우선 사용
+                base_conv_id = (
+                    st.session_state.get("learning_conversation_id")
+                    or st.session_state.get("session_uuid")
+                )
+
                 current_conversation = conversation_manager.get_or_create_conversation(
-                    st.session_state.get("session_uuid"),
+                    base_conv_id,
                     user_id,
                 )
                 if current_conversation:
@@ -1050,6 +1084,25 @@ def main():
 
     # Learning Agent 공통 Conversation 보장
     ensure_learning_conversation()
+
+    # LearningAgent 쓰레드와 Stage2 CSV 대화 ID(conversation_id) 동기화
+    learning_conv_id = st.session_state.get("learning_conversation_id")
+    current_conv_id = st.session_state.get("conversation_id")
+    if learning_conv_id and learning_conv_id != current_conv_id:
+        # Stage2 상태 초기화
+        st.session_state["conversation_id"] = learning_conv_id
+        st.session_state["messages_UploadData"] = []
+        st.session_state["df_UploadData"] = None
+        st.session_state["uploaded_data"] = None
+        st.session_state["last_result_df"] = None
+        st.session_state["last_figure"] = None
+        if "agent_with_UploadData" in st.session_state:
+            del st.session_state["agent_with_UploadData"]
+        if "python_tool" in st.session_state:
+            del st.session_state["python_tool"]
+
+        # DynamoDB에서 Stage2 CSV 히스토리 복원
+        load_stage2_csv_history_from_db(learning_conv_id)
 
     # 메인 영역
     state = agent.get_state()

@@ -617,7 +617,12 @@ class MessageManager:
             )
             
             # 첫 사용자 메시지인 경우 토픽 자동 설정
-            if role == "user" and content_type == "text":
+            if role == "user" and content_type in (
+                "text",
+                "learning_stage1_user_text",
+                "learning_stage2_user_text",
+                "learning_stage3_user_text",
+            ):
                 msg_count = self.messages_table.query(
                     KeyConditionExpression=Key('conversation_id').eq(conversation_id),
                     FilterExpression=Attr('role').eq('user'),
