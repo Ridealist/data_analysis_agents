@@ -955,50 +955,77 @@ def render_csv_agent_execution_ui(learning_agent: LearningAgentRunner):
         if "agent_with_UploadData" not in st.session_state and st.session_state.get(
             "messages_UploadData"
         ):
-            for role, content_list in st.session_state["messages_UploadData"]:
-                for content in content_list:
-                    if isinstance(content, list) and len(content) == 2:
-                        message_type, message_content = content
-                        if (
-                            message_type == MessageType.DATAFRAME
-                            and isinstance(message_content, pd.DataFrame)
-                        ):
-                            st.session_state["df_UploadData"] = message_content
-                            st.session_state["uploaded_data"] = message_content
+            dataframe_restored = False
+            
+            try:
+                for role, content_list in st.session_state["messages_UploadData"]:
+                    for content in content_list:
+                        if isinstance(content, list) and len(content) == 2:
+                            message_type, message_content = content
+                            if (
+                                message_type == MessageType.DATAFRAME
+                                and isinstance(message_content, pd.DataFrame)
+                            ):
+                                st.session_state["df_UploadData"] = message_content
+                                st.session_state["uploaded_data"] = message_content
+                                dataframe_restored = True
 
-                            if "python_tool" not in st.session_state:
-                                st.session_state["python_tool"] = PythonAstREPLTool()
+                                if "python_tool" not in st.session_state:
+                                    st.session_state["python_tool"] = PythonAstREPLTool()
 
-                            st.session_state["python_tool"].locals[
-                                "df_UploadData"
-                            ] = message_content
-                            st.session_state["python_tool"].locals[
-                                "df"
-                            ] = message_content
-                            st.session_state["python_tool"].locals["pd"] = pd
-                            st.session_state["python_tool"].locals["np"] = np
-                            st.session_state["python_tool"].locals["plt"] = plt
-                            st.session_state["python_tool"].locals["sns"] = sns
+                                st.session_state["python_tool"].locals[
+                                    "df_UploadData"
+                                ] = message_content
+                                st.session_state["python_tool"].locals[
+                                    "df"
+                                ] = message_content
+                                st.session_state["python_tool"].locals["pd"] = pd
+                                st.session_state["python_tool"].locals["np"] = np
+                                st.session_state["python_tool"].locals["plt"] = plt
+                                st.session_state["python_tool"].locals["sns"] = sns
 
-                            # Stage1 프롬프트 + 기본 prefix 결합
-                            combined_prefix = get_combined_prefix_prompt(learning_agent)
+                                # Stage1 프롬프트 + 기본 prefix 결합
+                                combined_prefix = get_combined_prefix_prompt(learning_agent)
 
-                            st.session_state["agent_with_UploadData"] = create_agent(
-                                message_content,
-                                st.session_state["model_option_general"],
-                                prefix_prompt=combined_prefix,
-                                postfix_prompt=AGENT_POSTFIX_PROMPT,
-                                shared_python_tool=st.session_state.get(
-                                    "python_tool", None
-                                ),
-                            )
-                            break
+                                st.session_state["agent_with_UploadData"] = create_agent(
+                                    message_content,
+                                    st.session_state["model_option_general"],
+                                    prefix_prompt=combined_prefix,
+                                    postfix_prompt=AGENT_POSTFIX_PROMPT,
+                                    shared_python_tool=st.session_state.get(
+                                        "python_tool", None
+                                    ),
+                                )
+                                break
+                    if dataframe_restored:
+                        break
+                
+                # 복원 실패 시 경고 및 초기화
+                if not dataframe_restored:
+                    st.warning("⚠️ 이전 데이터를 복원할 수 없습니다. 데이터를 다시 업로드해주세요.")
+                    st.session_state["messages_UploadData"] = []
+                    
+            except Exception as e:
+                print(f"[Stage2] 히스토리 복원 중 오류: {e}")
+                st.error(f"히스토리 복원 중 오류가 발생했습니다: {str(e)}")
+                st.session_state["messages_UploadData"] = []
 
         print_messages_main()
 
         user_input = st.chat_input("데이터에 질문해보세요!")
 
         if user_input:
+            # 🔴 필수: KeyError 방지 - agent 존재 여부 체크
+            if "agent_with_UploadData" not in st.session_state:
+                st.error("❌ 데이터 분석 에이전트가 초기화되지 않았습니다.")
+                st.info("👆 먼저 데이터를 업로드하고 '🚀 데이터 분석 시작' 버튼을 클릭해주세요.")
+                st.stop()
+            
+            if "python_tool" not in st.session_state:
+                st.error("❌ Python 도구가 초기화되지 않았습니다.")
+                st.info("👆 데이터 분석을 다시 시작해주세요.")
+                st.stop()
+            
             # 1) Learning Agent Stage2용 턴 증가 + user 텍스트 로그
             try:
                 if "learning_turn" not in st.session_state:
@@ -1024,48 +1051,56 @@ def render_csv_agent_execution_ui(learning_agent: LearningAgentRunner):
             }
 
             with st.spinner("AI가 생각하고 있습니다..."):
-                main_queue, sidebar_queue, error_queue = parallel_execution_manager(
-                    user_input,
-                    st.session_state["agent_with_UploadData"],
-                    st.session_state["python_tool"],
-                    learning_agent,
-                    add_message_main,
-                    session_state_proxy,
-                )
+                try:
+                    main_queue, sidebar_queue, error_queue = parallel_execution_manager(
+                        user_input,
+                        st.session_state["agent_with_UploadData"],
+                        st.session_state["python_tool"],
+                        learning_agent,
+                        add_message_main,
+                        session_state_proxy,
+                    )
 
-                with st.chat_message("assistant"):
-                    main_container = st.container()
+                    with st.chat_message("assistant"):
+                        main_container = st.container()
 
-                update_ui_from_queues(
-                    main_queue,
-                    sidebar_queue,
-                    error_queue,
-                    main_container,
-                    add_message_main,
-                )
+                    update_ui_from_queues(
+                        main_queue,
+                        sidebar_queue,
+                        error_queue,
+                        main_container,
+                        add_message_main,
+                    )
 
-                with main_container:
-                    if st.session_state.get("last_result_df") is not None:
-                        result_df = st.session_state["last_result_df"]
-                        if isinstance(result_df, (pd.DataFrame, pd.Series)):
-                            st.dataframe(result_df, use_container_width=True)
-                            add_message_main(
-                                MessageRole.ASSISTANT,
-                                [MessageType.DATAFRAME, result_df],
-                            )
-                            st.session_state["last_result_df"] = None
+                    with main_container:
+                        if st.session_state.get("last_result_df") is not None:
+                            result_df = st.session_state["last_result_df"]
+                            if isinstance(result_df, (pd.DataFrame, pd.Series)):
+                                st.dataframe(result_df, use_container_width=True)
+                                add_message_main(
+                                    MessageRole.ASSISTANT,
+                                    [MessageType.DATAFRAME, result_df],
+                                )
+                                st.session_state["last_result_df"] = None
 
-                    if st.session_state.get("last_figure") is not None:
-                        fig = st.session_state["last_figure"]
-                        if isinstance(fig, plt.Figure):
-                            st.pyplot(fig)
-                            add_message_main(
-                                MessageRole.ASSISTANT, [MessageType.FIGURE, fig]
-                            )
-                            plt.close(fig)
-                            st.session_state["last_figure"] = None
+                        if st.session_state.get("last_figure") is not None:
+                            fig = st.session_state["last_figure"]
+                            if isinstance(fig, plt.Figure):
+                                st.pyplot(fig)
+                                add_message_main(
+                                    MessageRole.ASSISTANT, [MessageType.FIGURE, fig]
+                                )
+                                plt.close(fig)
+                                st.session_state["last_figure"] = None
 
-            st.success("✅ 분석 완료!")
+                    st.success("✅ 분석 완료!")
+                    
+                except Exception as e:
+                    print(f"[Stage2] 병렬 실행 중 오류: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    st.error(f"❌ 분석 중 오류가 발생했습니다: {str(e)}")
+                    st.info("데이터 분석을 다시 시도해주세요. 문제가 지속되면 페이지를 새로고침해주세요.")
 
 
 # ============================================================
@@ -1117,7 +1152,11 @@ def main():
             del st.session_state["python_tool"]
 
         # DynamoDB에서 Stage2 CSV 히스토리 복원
-        load_stage2_csv_history_from_db(learning_conv_id)
+        try:
+            load_stage2_csv_history_from_db(learning_conv_id)
+        except Exception as e:
+            print(f"[Stage2] 히스토리 로딩 실패: {e}")
+            # 조용히 처리 (사용자 경험에 영향 최소화)
 
     # 메인 영역
     state = agent.get_state()
