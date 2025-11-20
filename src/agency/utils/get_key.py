@@ -20,7 +20,7 @@ def get_client():
 #### New API key using OpenAi ####
 
 def get_key_openAI():
-    return str(st.secrets["openai_api_key"])
+    return str(st.secrets["OPENAI_API_KEY"])
     
 def get_client_openAI():
     api_key = get_key_openAI()

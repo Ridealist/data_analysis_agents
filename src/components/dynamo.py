@@ -563,7 +563,15 @@ class MessageManager:
             st.error(f"메시지 로드 오류: {e}")
             return []
     
-    def save_message(self, conversation_id: str, role: str, content_type: str, content: str, llm_model: str = None) -> bool:
+    def save_message(
+        self,
+        conversation_id: str,
+        role: str,
+        content_type: str,
+        content: str,
+        llm_model: str = None,
+        turn: Optional[int] = None,
+    ) -> bool:
         """
         메시지 저장
         
@@ -573,6 +581,7 @@ class MessageManager:
             content_type: 콘텐츠 타입
             content: 메시지 내용
             llm_model: 사용된 LLM 모델명 (assistant 역할일 때만 사용)
+            turn: 유저-에이전트 1턴 번호 (옵션)
         
         Returns:
             bool: 저장 성공 여부
@@ -587,6 +596,10 @@ class MessageManager:
                 'content_type': content_type,
                 'content': content
             }
+            
+            # 턴 번호가 있는 경우 함께 저장
+            if turn is not None:
+                message_item['turn'] = turn
             
             # AI 답변인 경우 모델 정보 추가
             if role == 'assistant' and llm_model:
@@ -604,7 +617,12 @@ class MessageManager:
             )
             
             # 첫 사용자 메시지인 경우 토픽 자동 설정
-            if role == "user" and content_type == "text":
+            if role == "user" and content_type in (
+                "text",
+                "learning_stage1_user_text",
+                "learning_stage2_user_text",
+                "learning_stage3_user_text",
+            ):
                 msg_count = self.messages_table.query(
                     KeyConditionExpression=Key('conversation_id').eq(conversation_id),
                     FilterExpression=Attr('role').eq('user'),
@@ -699,7 +717,15 @@ class AgencyConversationManager:
                 if e.response['Error']['Code'] != 'ResourceInUseException':
                     raise
     
-    def save_agency_response(self, conversation_id: str, output: str, intent: List, assessment: str, llm_model: str = 'gpt-4.1') -> bool:
+    def save_agency_response(
+        self,
+        conversation_id: str,
+        output: str,
+        intent: List,
+        assessment: str,
+        llm_model: str = 'gpt-4.1',
+        turn: Optional[int] = None,
+    ) -> bool:
         """
         Agency 응답 저장 (output, intent, assessment)
         
@@ -751,6 +777,8 @@ class AgencyConversationManager:
                 'created_at': self._datetime_to_timestamp(now),
                 'LLM_model': llm_model
             }
+            if turn is not None:
+                agency_item['turn'] = turn
             self.agency_table.put_item(Item=agency_item)
             return True
         except Exception as e:
@@ -758,7 +786,7 @@ class AgencyConversationManager:
             traceback.print_exc()
             return False
     
-    def save_user_input(self, conversation_id: str, user_input: str) -> bool:
+    def save_user_input(self, conversation_id: str, user_input: str, turn: Optional[int] = None) -> bool:
         """
         사용자 입력 저장
         
@@ -782,6 +810,8 @@ class AgencyConversationManager:
                 'created_at': self._datetime_to_timestamp(now),
                 'LLM_model': ''
             }
+            if turn is not None:
+                agency_item['turn'] = turn
             self.agency_table.put_item(Item=agency_item)
             return True
         except Exception as e:

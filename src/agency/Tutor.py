@@ -22,10 +22,10 @@ class AgencyTutor():
         self.model = model
         self.intermediary.update_model(model)
 
-    def get_response(self, conversation_history, messages_student, max_tokens=1500):
+    def get_response(self, conversation_history, messages_student, max_tokens=1500, phase_context=None):
         #print("\n---")
         #print("tutor called using model ", self.model)
-        prompt, intent, assessment, prompt_tokens, completion_tokens = self.intermediary.get_prompt(conversation_history, messages_student, open=self.open)
+        prompt, intent, assessment, prompt_tokens, completion_tokens = self.intermediary.get_prompt(conversation_history, messages_student, open=self.open, phase_context=phase_context)
         #prompt.append({"role": "system", "content": "Ask the student to find by themself a problem with their answer without giving any hint"})
         #print("prompt generated:")
         #print_logs(prompt)
@@ -48,10 +48,10 @@ class AgencyTutor():
         #print("---")
         return response, total_tokens, prompt_tokens, completion_tokens, intent, assessment
     
-    def get_response_stream(self, conversation_history, messages_student, max_tokens=1500):
+    def get_response_stream(self, conversation_history, messages_student, max_tokens=1500, phase_context=None):
         #print("\n---")
         #print("tutor called using model ", self.model)
-        prompt, intent, assessment, _, _ = self.intermediary.get_prompt(conversation_history, messages_student, open=self.open)
+        prompt, intent, assessment, _, _ = self.intermediary.get_prompt(conversation_history, messages_student, open=self.open, phase_context=phase_context)
         #prompt.append({"role": "system", "content": "Ask the student to find by themself a problem with their answer without giving any hint"})
         #print("prompt generated:")
         #print_logs(prompt)

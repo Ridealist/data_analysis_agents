@@ -25,11 +25,11 @@ class Intermediary():
         self.intentSelector.model = model
         self.promptGenerator.model = model
 
-    def get_prompt(self, conversation_history, student_prompt, open=True):
+    def get_prompt(self, conversation_history, student_prompt, open=True, phase_context=None):
         #print("generating tutor's prompt...")
         assessment,assessor_prompt_tokens,assessor_completion_tokens = self.assessor.assess(conversation_history, student_prompt)
         intent = self.intentSelector.get_intent(assessment, open=open)
-        prompt = self.promptGenerator.get_prompt(conversation_history, student_prompt, intent)
+        prompt = self.promptGenerator.get_prompt(conversation_history, student_prompt, intent, phase_context=phase_context)
         return prompt, intent, assessment, assessor_prompt_tokens, assessor_completion_tokens
 
 

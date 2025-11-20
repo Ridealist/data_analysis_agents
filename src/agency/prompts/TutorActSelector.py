@@ -110,7 +110,7 @@ class LLMIntentSelector():
 
     def __init__(self,client,intent_history=[]) -> None:
         self.client = client
-        self.previous_intent = intent_history[-1] if intent_history != [] else [TutorAct.MP_GOAL]
+        self.previous_intent = intent_history[-1] if intent_history != [] else [TutorAct.MEL_EXPLORE]
 
     def get_intent(self,assessment,open=True):
         print("selecting intent... ")
@@ -147,11 +147,6 @@ class LLMIntentSelector():
     SE_GROWTH : 성과와 발전을 구체적으로 강조하여 성장 인식
     SE_CONFIDENCE : 어려운 과제도 단계적 접근으로 해결 가능함을 확신
 
-[메타인지-계획 - Metacognition-Planning]
-    MP_GOAL : AI를 활용한 구체적 학습 목표/성공 기준 설정 유도
-    MP_STRATEGY : 과제 수행 전략과 순서를 체계적으로 계획하도록 지원
-    MP_CRITERIA : 결과 평가 기준을 스스로 고민하고 적용하도록 격려
-
 [메타인지-수행-리터러시 - Metacognition-Execution-Literacy]
     MEL_EXPLORE : 다양한 질문(프롬프트) 방식을 탐색하도록 유도
     MEL_REFINE : AI 결과에 따라 프롬프트를 수정/개선하도록 판단 지원
@@ -160,29 +155,25 @@ class LLMIntentSelector():
 [메타인지-수행-책임의식 - Metacognition-Execution-Responsibility]
     MER_OWNERSHIP : 학습 주체로서 노력을 AI에 위임하지 않도록 인지
     MER_BOUNDARY : AI를 사용하지 말아야 할 시점/상황을 스스로 결정
-    MER_ETHICS : 개인정보 보호, AI 편향 등 윤리 이슈를 점검
-
-[메타인지-성찰 - Metacognition-SelfReflection]
-    MS_EVALUATE : AI와의 상호작용 전반을 평가하고 개선점 탐색
-    MS_CONSOLIDATE : AI 활용을 통해 습득한 지식과 기술을 정리
-    MS_COMPARE : 학습 전과 후의 비교를 통해 내 이해 정도 변화 성찰
 
 [내재적 동기 - Intrinsic Motivation]
     IM_DISCOVERY : 새로운 지식 발견의 즐거움과 가치를 강조
     IM_ACHIEVEMENT : 과제 완수의 성취감을 충분히 느끼도록 지원
-    IM_AUTONOMY : 여러 방법 중 하나로 AI를 주도적으로 선택 및 활용
 ##
 
 학생의 마지막 메시지에 대한 평가는 다음과 같습니다: {assessment_codes}.
 
 평가와 튜터의 마지막 의도를 바탕으로, 튜터의 다음 메시지에 가장 적합한 의도 세트를 선택하세요.
-단계별로 진행하세요. 먼저 선택을 간단히 정당화한 다음, *분류체계*에서 선택된 의도들을 포함하는 목록을 제공하세요.
+
+**중요 제약 사항**:
+1. **최대 2개의 TutorAct만 선택**하세요. 절대 3개 이상 선택하지 마세요.
+2. 가장 핵심적인 1-2개의 Act만 선택하여 간결한 피드백을 제공하세요.
 
 다음 JSON 형식으로 답변하세요:
 ##
 {{
     "justification": "TutorAct 선택 근거...",
-    "selected_acts": ["주요 Act", "보조 Act (선택적)"],
+    "selected_acts": ["주요 Act", "보조 Act (선택적, 최대 2개)"]
 }}
 ##
 {{"""

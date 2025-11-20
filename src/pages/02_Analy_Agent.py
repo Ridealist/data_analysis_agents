@@ -29,7 +29,8 @@ from src.prompts.agent_prompts import AGENT_PREFIX_PROMPT, AGENT_POSTFIX_PROMPT
 from src.utils.dataframe_handler import safe_dataframe_display
 
 # Agency Tutor 관련 import
-from src.agency.Tutor import AgencyTutor
+# from src.agency.Tutor import AgencyTutor
+from src.agency_langgraph.tutor import AgencyTutorLG
 
 # 경고 메시지 숨기기
 warnings.filterwarnings('ignore')
@@ -47,7 +48,11 @@ os.environ["LANGCHAIN_TRACING_V2"] = st.secrets["LANGCHAIN_TRACING_V2"]
 os.environ["LANGCHAIN_API_KEY"] = st.secrets["LANGCHAIN_API_KEY"]
 os.environ["LANGCHAIN_ENDPOINT"] = st.secrets["LANGCHAIN_ENDPOINT"]
 os.environ["LANGCHAIN_PROJECT"] = st.secrets["LANGCHAIN_PROJECT"]
+<<<<<<<< HEAD:src/pages/98_CSV_Agent.py
+# logging.langsmith("Agent 챗봇 1차 현장적용[수원외고] 0828")
+========
 logging.langsmith("Agent 챗봇 2차 현장적용[수원외고] 1030")
+>>>>>>>> main:src/pages/02_Analy_Agent.py
 
 # --- 데이터베이스 설정 ---
 AWS_ACCESS_KEY_ID = st.secrets.get("AWS_ACCESS_KEY_ID")
@@ -440,7 +445,7 @@ def create_thinking_chain(api_key):
     client = OpenAI(api_key=api_key)
     model = "gpt-4.1"
 
-    st.session_state['Tutor'] = AgencyTutor(client, model=model)
+    st.session_state['Tutor'] = AgencyTutorLG(client, model=model)
     
     return st.session_state['Tutor']
 
