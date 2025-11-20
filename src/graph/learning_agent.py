@@ -1857,14 +1857,17 @@ class LearningAgentRunner:
     
     def __init__(self):
         if "learning_graph" not in st.session_state:
-            # st.session_state.learning_graph = create_learning_agent_graph()
             st.session_state.learning_graph = create_learning_agent_graph()
         
         self.graph = st.session_state.learning_graph
         
-        # 스레드 목록 초기화
+        # 스레드 목록 초기화 (없으면 DynamoDB에서 한번 동기화 시도)
         if "learning_thread_list" not in st.session_state:
             st.session_state.learning_thread_list = []
+            try:
+                self.sync_thread_list_from_db()
+            except Exception as e:
+                print(f"[LearningAgentRunner] 초기 thread 동기화 실패: {e}")
         
         # 현재 스레드 초기화
         if "learning_thread_id" not in st.session_state:
@@ -1873,35 +1876,81 @@ class LearningAgentRunner:
         self.config = {
             "configurable": {"thread_id": st.session_state.learning_thread_id}
         }
-    
-    def create_new_thread(self, title=None):
-        """새로운 학습 세션 시작"""
-        new_thread_id = str(uuid.uuid4())
-        
-        # 스레드 정보 저장
+
+    def sync_thread_list_from_db(self):
+        """
+        DynamoDB의 learning_conversations 테이블에서
+        현재 사용자 기준 학습 세션 목록을 불러와 session_state에 저장.
+        """
+        try:
+            from src.graph.learning_logging import load_learning_threads_for_user
+
+            threads = load_learning_threads_for_user()
+            if threads:
+                st.session_state.learning_thread_list = threads
+        except Exception as e:
+            print(f"[LearningAgentRunner] sync_thread_list_from_db 오류: {e}")
+
+    def create_new_thread(self, title: Optional[str] = None):
+        """새로운 학습 세션 시작 (LangGraph thread + DynamoDB conversation 동시 생성)"""
         import datetime
-        thread_info = {
-            "id": new_thread_id,
-            "title": title or f"학습 세션 {len(st.session_state.learning_thread_list) + 1}",
-            "created_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "phase": "planning"
-        }
-        
-        st.session_state.learning_thread_list.append(thread_info)
+
+        new_thread_id = str(uuid.uuid4())
+
+        # 1) LangGraph thread 설정
         st.session_state.learning_thread_id = new_thread_id
-        
         self.config = {
             "configurable": {"thread_id": new_thread_id}
         }
-        
+
+        # 2) DynamoDB conversation 생성/연결
+        try:
+            from src.graph.learning_logging import init_learning_managers
+
+            username = st.session_state.get("username", "anonymous")
+            _, conversation_manager, message_manager = init_learning_managers()
+
+            if conversation_manager and message_manager:
+                conv = conversation_manager.get_or_create_conversation(
+                    session_uuid=new_thread_id,
+                    user_id=username,
+                )
+                if conv:
+                    st.session_state["learning_conversation_id"] = conv["session_uuid"]
+                    st.session_state["learning_message_manager"] = message_manager
+                    st.session_state["learning_conversation_created_at"] = conv.get(
+                        "created_at"
+                    )
+        except Exception as e:
+            print(f"[LearningAgentRunner] create_new_thread Dynamo 연동 실패: {e}")
+
+        # 3) sidebar에서 사용할 스레드 정보 저장 / 갱신
+        thread_info = {
+            "id": new_thread_id,
+            "title": title
+            or f"학습 세션 {len(st.session_state.get('learning_thread_list', [])) + 1}",
+            "created_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "phase": "planning",
+        }
+
+        st.session_state.setdefault("learning_thread_list", []).append(thread_info)
+
         return new_thread_id
-    
+
     def switch_thread(self, thread_id: str):
-        """다른 학습 세션으로 전환"""
+        """다른 학습 세션으로 전환 (LangGraph thread + DynamoDB conversation 연결)"""
         st.session_state.learning_thread_id = thread_id
         self.config = {
             "configurable": {"thread_id": thread_id}
         }
+
+        # 해당 thread_id용 DynamoDB conversation 보장
+        try:
+            from src.graph.learning_logging import ensure_learning_conversation
+
+            ensure_learning_conversation()
+        except Exception as e:
+            print(f"[LearningAgentRunner] switch_thread ensure_learning_conversation 실패: {e}")
     
     def update_thread_info(self, thread_id: str, **kwargs):
         """스레드 정보 업데이트"""

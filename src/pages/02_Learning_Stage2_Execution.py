@@ -1029,7 +1029,13 @@ def main():
         page_icon="🚀",
         layout="wide"
     )
-    
+
+    # 로그인 여부 확인 (로그인하지 않았다면 접근 차단)
+    if "logged_in" not in st.session_state or not st.session_state["logged_in"]:
+        st.warning("⚠️ 이 페이지는 로그인이 필요한 페이지입니다.")
+        st.info("👈 상단 메뉴에서 '메인 페이지'로 이동해 로그인 후 다시 시도해주세요.")
+        st.stop()
+
     st.title("🚀 Stage 2: 데이터 분석 실행")
     
     st.markdown("""

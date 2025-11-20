@@ -7,6 +7,7 @@ from src.graph.learning_agent import LearningAgentRunner
 from src.graph.utils import get_phase_messages, get_thread_specific_key
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage, SystemMessage
 from src.components.dataclass import MessageRole, MessageType
+from src.graph.learning_logging import load_learning_threads_for_user
 
 URL_PROF_IMAGE = "./data/teacher.png"
 
@@ -31,66 +32,66 @@ def extract_csv_text_conversation() -> str:
 # ============================================================
 
 def render_thread_manager(agent: LearningAgentRunner):
-    """스레드 관리 UI (사이드바용)"""
+    """학습 세션(스레드) 관리 UI (사이드바용)"""
 
     st.divider()
-
     st.header("📚 학습 세션 관리")
-    
+
     # 세션 상태 안전하게 가져오기
+    if "learning_thread_list" not in st.session_state:
+        try:
+            st.session_state.learning_thread_list = load_learning_threads_for_user()
+        except Exception as e:
+            print(f"[render_thread_manager] thread 목록 로드 실패: {e}")
+            st.session_state.learning_thread_list = []
+
     thread_list = st.session_state.get("learning_thread_list", [])
     current_thread_id = st.session_state.get("learning_thread_id", None)
-    
+
+    # 스레드가 하나도 없거나 현재 스레드가 없으면 새로 생성 안내
     if not thread_list or not current_thread_id:
         st.info("새 학습 세션을 시작하세요")
         if st.button("➕ 새 학습 세션 시작", type="primary", use_container_width=True):
             agent.create_new_thread()
             st.rerun()
         return
-    
+
+    # 학습 세션 목록 표시 (기존 UI 스타일 유지)
     if thread_list:
-        # 현재 세션 표시
-        # current_thread = agent.get_thread_info(current_thread_id)
-        # if current_thread:
-        #     st.write(f"**현재 세션:** {current_thread['title']}")
-        #     st.caption(f"생성: {current_thread['created_at']}")
-        #     st.caption(f"단계: {current_thread['phase']}")
-        
-        # st.divider()
-        
-        # 세션 선택
-        # st.write("**저장된 세션:**")
-        
         for i, thread in enumerate(reversed(thread_list)):  # 최신순
             is_current = thread["id"] == current_thread_id
-            
+
             col1, col2 = st.columns([3, 1])
-            
+
             with col1:
                 # 세션 정보
                 phase_emoji = {
                     "planning": "📝",
-                    "execution": "🚀", 
+                    "execution": "🚀",
                     "reflection": "🪞",
-                    "complete": "✅"
+                    "complete": "✅",
                 }
                 emoji = phase_emoji.get(thread["phase"], "❓")
-                
+
                 label = f"{emoji} {thread['title']}"
                 if is_current:
                     label = f"**🔵 {label}** (현재)"
-                
+
                 st.write(label)
                 st.caption(f"{thread['created_at']} | {thread['phase']}")
-            
+
             with col2:
                 if not is_current:
-                    if st.button("열기", key=f"switch_{thread['id']}", use_container_width=True):
+                    if st.button(
+                        "열기",
+                        key=f"switch_{thread['id']}",
+                        use_container_width=True,
+                    ):
                         agent.switch_thread(thread["id"])
                         st.rerun()
-        
+
         st.divider()
-    
+
     # 새 세션 시작
     if st.button("➕ 새 학습 세션 시작", type="primary", use_container_width=True):
         agent.create_new_thread()
@@ -322,6 +323,10 @@ def render_learning_sidebar(agent: LearningAgentRunner, current_page: str = None
     """
 
     with st.sidebar:
+        # 로그인된 사용자 정보 표시 (있을 경우)
+        if st.session_state.get("logged_in") and st.session_state.get("username"):
+            st.caption(f"👤 {st.session_state['username']}님 로그인됨")
+
         state = agent.get_state()
 
         if not state:

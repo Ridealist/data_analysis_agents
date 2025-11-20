@@ -9,8 +9,8 @@ if "session_id" not in st.session_state:
     st.session_state["session_id"] = None
 
 
-st.title("📊 Data Analysis Agent")
-st.write("**데이터 분석 에이전트**는 데이터를 분석하고 시각화할 수 있는 ChatGPT 기반의 도구입니다.")
+st.title("🌱 Learning AI Agent")
+st.write("**학습 AI 에이전트**는 생성형 AI를 주도성을 갖고 사용할 수 있도록 도와주는 학습 파트너입니다.")
 
 # st.write("Please log in to continue (username `test`, password `test`).")
 # secrets.toml에서 사용자 정보 가져오기
@@ -38,4 +38,5 @@ if st.button("Log in", type="primary"):
             
             st.success(f"로그인 성공! 환영합니다, {username}님!")
             time.sleep(0.5)
-            st.switch_page("src/pages/02_CSV_Agent.py")
+            # 로그인 후 Stage 1: 계획 페이지로 이동
+            st.switch_page("src/pages/01_Learning_Stage1_Planning.py")

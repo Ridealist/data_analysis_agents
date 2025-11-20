@@ -1,7 +1,12 @@
 import streamlit as st
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List, Dict
 
-from src.components.dynamo import DynamoDBManager, ConversationManager, MessageManager
+from src.components.dynamo import (
+    DynamoDBManager,
+    ConversationManager,
+    MessageManager,
+    timestamp_to_datetime,
+)
 
 
 AWS_ACCESS_KEY_ID = st.secrets.get("AWS_ACCESS_KEY_ID")
@@ -104,5 +109,50 @@ def ensure_learning_conversation():
     except Exception as e:
         # 로깅만 하고 앱 동작은 계속
         print(f"[learning_logging] 대화 생성/연결 중 오류: {e}")
+
+
+
+def load_learning_threads_for_user() -> List[Dict]:
+    """
+    현재 로그인한 사용자의 학습 세션 목록을 DynamoDB에서 조회하여
+    sidebar / LearningAgentRunner 에서 사용할 수 있는 단순 리스트로 변환.
+    """
+    if not hasattr(st.session_state, "username"):
+        return []
+
+    _, conversation_manager, _ = init_learning_managers()
+    if conversation_manager is None:
+        return []
+
+    try:
+        conversations = conversation_manager.get_user_conversations(
+            st.session_state.username
+        )
+    except Exception as e:
+        print(f"[load_learning_threads_for_user] Error: {e}")
+        return []
+
+    thread_list: List[Dict] = []
+    for conv in conversations:
+        created_at = conv.get("created_at")
+        created_str = ""
+        if created_at is not None:
+            try:
+                dt = timestamp_to_datetime(created_at)
+                created_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                created_str = str(created_at)
+
+        thread_list.append(
+            {
+                "id": conv.get("session_uuid"),
+                "title": conv.get("topic", "학습 세션"),
+                "created_at": created_str,
+                # 기존 스키마에는 phase가 없을 수 있으므로 기본값을 planning으로 설정
+                "phase": conv.get("phase", "planning"),
+            }
+        )
+
+    return thread_list
 
 
