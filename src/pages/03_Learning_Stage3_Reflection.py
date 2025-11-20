@@ -87,15 +87,15 @@ def main():
         st.info("👈 좌측 사이드바에서 'Stage 2: 실행'으로 이동하세요")
         
         ##TODO 배포시 삭제: 테스트 모드 추가
-        st.divider()
-        st.subheader("🧪 개발/테스트 모드")
-        st.caption("Stage 1, 2를 건너뛰고 Stage 3을 바로 테스트할 수 있습니다.")
+        # st.divider()
+        # st.subheader("🧪 개발/테스트 모드")
+        # st.caption("Stage 1, 2를 건너뛰고 Stage 3을 바로 테스트할 수 있습니다.")
         
-        if st.button("🚀 Stage 3 테스트 모드로 시작", type="secondary"):
-            with st.spinner("테스트 환경 설정 중..."):
-                agent.setup_test_reflection_stage()
-            st.success("✅ 테스트 환경이 설정되었습니다!")
-            st.rerun()
+        # if st.button("🚀 Stage 3 테스트 모드로 시작", type="secondary"):
+        #     with st.spinner("테스트 환경 설정 중..."):
+        #         agent.setup_test_reflection_stage()
+        #     st.success("✅ 테스트 환경이 설정되었습니다!")
+        #     st.rerun()
     else:
         current_phase = state.get("phase", "reflection")
         reflection_completed = state.get("reflection_completed", False)
