@@ -1,5 +1,5 @@
 """
-Learning Agent - Stage 3: 반성 (Reflection)
+Learning Agent - Stage 3: 성찰 (Reflection)
 """
 
 import streamlit as st
@@ -28,9 +28,9 @@ def render_message(msg, reflection_info=None):
             pass
             # Tool call 정보 표시 - reflection_info 사용
             # with st.chat_message("assistant"):
-            #     st.write("✅ 반성 정보가 수집되었습니다!")
+            #     st.write("✅ 성찰 정보가 수집되었습니다!")
             #     if reflection_info:
-            #         with st.expander("수집된 반성 내용 보기"):
+            #         with st.expander("수집된 성찰 내용 보기"):
             #             st.json(reflection_info)
         else:
             st.chat_message("assistant", avatar=URL_PROF_IMAGE).write(msg.content)
@@ -43,7 +43,7 @@ def render_message(msg, reflection_info=None):
 
 def main():
     st.set_page_config(
-        page_title="Stage 3: 반성",
+        page_title="Stage 3: 성찰",
         page_icon="🪞",
         layout="wide"
     )
@@ -54,10 +54,10 @@ def main():
         st.info("👈 상단 메뉴에서 '메인 페이지'로 이동해 로그인 후 다시 시도해주세요.")
         st.stop()
 
-    st.title("🪞 Stage 3: 학습 반성 및 정리")
+    st.title("🪞 Stage 3: 학습 되돌아보기 및 정리")
     
     st.markdown("""
-    **Learning AI Agent - 반성 단계**
+    **Learning AI Agent - 성찰 단계**
     
     이번 학습을 돌아보며 성찰해봅시다! 다음 정보를 수집합니다:
     - 🎯 목표 달성 여부
@@ -119,7 +119,7 @@ def main():
         
         st.divider()
 
-        # 메시지/반성 경계 관리용 세션 상태
+        # 메시지/성찰 경계 관리용 세션 상태
         if "stage3_reflection_start_idx" not in st.session_state:
             st.session_state["stage3_reflection_start_idx"] = None
 
@@ -135,9 +135,9 @@ def main():
 
         # 안내 메시지(항상 고정으로 맨 위에 표시)
         with st.chat_message("assistant", avatar=URL_PROF_IMAGE):
-            st.markdown("🪞 Stage 3를 시작해요. 아래 중 하나를 선택해주세요: \n\n 1. 반성 진행 \n 2. 실행 단계 대화 요약 \n\n 원하는 선택을 '반성' 또는 '요약'으로 답해주세요.")
+            st.markdown("🪞 Stage 3를 시작해요. 아래 중 하나를 선택해주세요: \n\n 1. 성찰 진행 \n 2. 실행 단계 대화 요약 \n\n 원하는 선택을 '성찰' 또는 '요약'으로 답해주세요.")
         
-        # 반성 단계 메시지 표시
+        # 성찰 단계 메시지 표시
         for msg in reflection_messages:   
             if not isinstance(msg, SystemMessage):
                 # 특별한 요약 생성 메시지는 표시하지 않음
@@ -145,7 +145,7 @@ def main():
                     continue
                 render_message(msg, reflection_info)
         
-        # # 요약 메시지 이후의 메시지만 표시 (반성 단계 메시지)
+        # # 요약 메시지 이후의 메시지만 표시 (성찰 단계 메시지)
         # reflection_start_idx = 0
         # for i, msg in enumerate(messages):
         #     if isinstance(msg, AIMessage) and "실행 단계 대화 요약이 완료되었습니다" in msg.content:
@@ -158,7 +158,7 @@ def main():
         #         st.chat_message("assistant").write(msg.content)
         #         break
         
-        # # 반성 단계 메시지 표시
+        # # 성찰 단계 메시지 표시
         # for msg in messages[reflection_start_idx:]:
         #     if not isinstance(msg, SystemMessage):
         #         # 특별한 요약 생성 메시지는 표시하지 않음

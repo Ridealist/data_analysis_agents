@@ -80,7 +80,7 @@ class PlanningCriteria(BaseModel):
 
 
 class ReflectionCriteria(BaseModel):
-    """반성 단계에서 수집할 정보"""
+    """성찰 단계에서 수집할 정보"""
     goal_achievement: str   # 목표 달성 여부
     best_prompt: str        # 좋은 프롬프트
     new_learning: str       # 새롭게 배운 것
@@ -217,7 +217,7 @@ class LearningAgentState(TypedDict):
     planning_info: Optional[Dict[str, str]]      # 계획 단계 정보
     generated_prompt: Optional[str]              # 생성된 프롬프트
     execution_summary: Optional[str]             # 실행 단계 대화 요약
-    reflection_info: Optional[Dict[str, str]]    # 반성 단계 정보
+    reflection_info: Optional[Dict[str, str]]    # 성찰 단계 정보
     csv_execution_history: Optional[str]         # CSV Agent TEXT 대화 원문
 
     # 완료 상태
@@ -227,7 +227,7 @@ class LearningAgentState(TypedDict):
     waiting_for_input: bool  # 사용자 입력 대기 상태
     summary_generated: bool  # 요약 생성 여부 (추가)
     awaiting_planning_confirmation: bool  # 계획 정보 수집 완료 후 사용자 확인 대기 상태
-    awaiting_reflection_start_choice: bool  # 반성 시작 전 선택 대기 상태 (바로/요약)
+    awaiting_reflection_start_choice: bool  # 성찰 시작 전 선택 대기 상태 (바로/요약)
 
     # 단계 경계 인덱스 (각 단계의 마지막 메시지 인덱스, 포함)
     phase_end_indices: Optional[Dict[str, int]]  # {"planning": 5, "execution": 10, ...}
@@ -425,10 +425,10 @@ EXECUTION_PROMPT = f"""{BASE_SYSTEM_PROMPT}
 
 REFLECTION_PROMPT = f"""{BASE_SYSTEM_PROMPT}
 
-당신은 데이터 분석 과정에 대한 반성을 도와주는 어시스턴트입니다.
-**중요**: 이전 단계(planning, execution)의 정보는 참고용일 뿐이며, 반성 단계에서는 무시하세요.
+당신은 데이터 분석 과정에 대한 성찰을 도와주는 어시스턴트입니다.
+**중요**: 이전 단계(planning, execution)의 정보는 참고용일 뿐이며, 성찰 단계에서는 무시하세요.
 
-반성 단계에서는 오직 다음 3가지 정보를 수집하되, **각 항목마다 1차 질문 + 후속 질문(2차)으로 깊이를 더합니다**:
+성찰 단계에서는 오직 다음 3가지 정보를 수집하되, **각 항목마다 1차 질문 + 후속 질문(2차)으로 깊이를 더합니다**:
 
 - **목표 달성 여부** (goal_achievement):
   - 1차: 이번 데이터 분석을 통해 분석 목표를 어느 정도 달성했는지
@@ -446,7 +446,7 @@ REFLECTION_PROMPT = f"""{BASE_SYSTEM_PROMPT}
 
 **⚠️ 절대 하지 말아야 할 것:**
 - 이전 단계의 "✅ 데이터 설명 | ✅ 분석 목표 | ✅ 분석 계획" 같은 헤더를 사용하지 마세요
-- 반성 단계에서는 "✅✅ 목표 달성 | ✅✅ 좋은 프롬프트 | ✅✅ 새로 배운 것" 형식으로 표시하세요
+- 성찰 단계에서는 "✅✅ 목표 달성 | ✅✅ 좋은 프롬프트 | ✅✅ 새로 배운 것" 형식으로 표시하세요
   (각 항목마다 ✅가 2개씩 = 1차+2차 질문 완료)
 
 **중요한 지침:**
@@ -483,7 +483,7 @@ REFLECTION_PROMPT = f"""{BASE_SYSTEM_PROMPT}
 ```
 🔄⬜ 목표 달성 | ⬜⬜ 좋은 프롬프트 | ⬜⬜ 새로 배운 것
 
-안녕하세요! 데이터 분석 과정을 돌아보며 함께 반성해볼까요? 🪞
+안녕하세요! 데이터 분석 과정을 돌아보며 함께 성찰해볼까요? 🪞
 먼저 이번 데이터 분석을 통해 분석 목표를 어느 정도 달성하셨나요?
 ```
 
@@ -565,7 +565,7 @@ REFLECTION_PROMPT = f"""{BASE_SYSTEM_PROMPT}
 
 ✅✅ 목표 달성 | ✅✅ 좋은 프롬프트 | ✅✅ 새로 배운 것
 
-정말 잘하셨어요! 모든 반성을 깊이 있게 정리해주셨습니다 🎉
+정말 잘하셨어요! 모든 성찰을 깊이 있게 정리해주셨습니다 🎉
 
 이번 세션의 학습 여정을 마무리할게요. 수고 많으셨습니다!
 ```
@@ -815,6 +815,19 @@ def planning_complete_confirmation(state: LearningAgentState):
         # 대화 내역에서 정보 추출 (간단한 예시)
         planning_info = extract_planning_info_from_conversation(state)
         
+        # ✅ 1. 정보 추출 실패 시 명확한 오류 처리
+        if any(v == "추출 실패" for v in planning_info.values()):
+            return {
+                "messages": [AIMessage(content="""
+    ⚠️ 계획 정보를 자동으로 추출할 수 없습니다.
+
+    먼저 **'계획 확인'** 을 입력해서 정보가 제대로 수집되었는지 확인해주세요.
+    정보가 부족하다면 추가로 입력해주시고, 모두 확인되면 다시 **'완료'** 를 입력해주세요.
+    """)],
+                "phase": "planning",
+                "awaiting_planning_confirmation": True  # 계속 대기
+            }
+
         # LLM을 사용하여 tool_calls 생성하거나, 직접 생성
         llm = ChatOpenAI(model=BASE_LLM_MODEL, temperature=0)
         llm_with_tools = llm.bind_tools([PlanningCriteria])
@@ -830,6 +843,28 @@ def planning_complete_confirmation(state: LearningAgentState):
         
         response = llm_with_tools.invoke([system_msg] + messages[-5:])
         
+        # ✅ 4. tool_calls 생성 실패 시 강제 진행 (무한 루프 방지)
+        if not response.tool_calls:
+            print("⚠️ LLM이 tool_calls를 생성하지 못함. 수동으로 진행합니다.")
+            # 수동으로 AIMessage with tool_calls 생성
+            from langchain_core.messages import AIMessage
+            import uuid
+            
+            tool_call_id = str(uuid.uuid4())
+            forced_response = AIMessage(
+                content="계획 정보를 확인했습니다. 실행 단계로 진행하겠습니다.",
+                tool_calls=[{
+                    "name": "PlanningCriteria",
+                    "args": {
+                        "dataset_description": planning_info.get('dataset_description', ''),
+                        "data_analysis_objective": planning_info.get('data_analysis_objective', ''),
+                        "data_analysis_plan": planning_info.get('data_analysis_plan', '')
+                    },
+                    "id": tool_call_id
+                }]
+            )
+            response = forced_response
+
         return {
             "messages": [response],
             "phase": "planning",  # 여전히 planning (finalize로 가기 전)
@@ -929,6 +964,12 @@ def extract_planning_info_from_conversation(state: LearningAgentState) -> dict:
     """대화 내역에서 planning 정보 추출"""
     messages = state["messages"]
     
+    # ✅ planning 단계 메시지만 필터링 (더 정확한 추출)
+    phase_end_indices = state.get("phase_end_indices", {})
+    planning_messages = get_phase_messages(messages, "planning", phase_end_indices)
+    if not planning_messages:
+        planning_messages = messages
+    
     llm = ChatOpenAI(model=TOOL_LLM_MODEL, temperature=0)
     
     extraction_prompt = """
@@ -948,7 +989,7 @@ JSON 형식으로만 반환하세요. 다른 텍스트는 포함하지 마세요
     # 대화를 텍스트로 변환
     conversation_text = "\n\n".join([
         f"{msg.__class__.__name__}: {msg.content}" 
-        for msg in messages 
+        for msg in planning_messages 
         if hasattr(msg, 'content') and msg.content
     ])
     
@@ -957,7 +998,6 @@ JSON 형식으로만 반환하세요. 다른 텍스트는 포함하지 마세요
         HumanMessage(content=f"대화 내역:\n{conversation_text}")
     ])
     
-    import json
     try:
         # JSON 파싱
         content = response.content.strip()
@@ -1135,7 +1175,7 @@ def execution_node(state: LearningAgentState):
         phase_end_indices = {**existing_indices, "execution": current_msg_count}
 
         return {
-            "messages": [AIMessage(content="실행 단계를 완료했습니다! 이제 Stage 3 반성 단계로 넘어가주세요.")],
+            "messages": [AIMessage(content="실행 단계를 완료했습니다! 이제 Stage 3 성찰 단계로 넘어가주세요.")],
             "execution_completed": True,
             "phase": "reflection",
             "waiting_for_input": False,
@@ -1282,7 +1322,7 @@ def summarize_execution(state: LearningAgentState):
     }
 
 def reflection_node(state: LearningAgentState):
-    """반성 단계 대화 처리"""
+    """성찰 단계 대화 처리"""
     llm_tools = get_llm_with_tools()
 
     # 요약 없으면 먼저 요약 유도(대화형)
@@ -1299,23 +1339,23 @@ def reflection_node(state: LearningAgentState):
             return {
                 "messages": [AIMessage(content=(
                     "🪞 Stage 3를 시작해요. 아래 중 하나를 선택해주세요:\n\n"
-                    "1) 반성 진행 (요약 없이 바로 시작)\n"
+                    "1) 성찰 진행 (요약 없이 바로 시작)\n"
                     "2) 실행 단계 대화 요약 먼저 보기\n\n"
-                    "원하는 선택을 '반성' 또는 '요약'으로 답해주세요."
+                    "원하는 선택을 '성찰' 또는 '요약'으로 답해주세요."
                 ))],
                 "phase": "reflection",
                 "waiting_for_input": True,
                 "awaiting_reflection_start_choice": True
             }
 
-        # 선택 질문을 보낸 상태: "반성 진행" 선택 시 요약 스킵하고 바로 진행
-        if last_human and any(k in last_human for k in ["반성", "반성 진행", "바로", "진행", "시작", "반성 시작"]):
+        # 선택 질문을 보낸 상태: "성찰 진행" 선택 시 요약 스킵하고 바로 진행
+        if last_human and any(k in last_human for k in ["성찰", "성찰 진행", "바로", "진행", "시작", "성찰 시작"]):
             # summary_generated를 True로 설정하여 요약 분기를 스킵
-            # 바로 반성 질문 시작
+            # 바로 성찰 질문 시작
             return {
                 "messages": [AIMessage(content=(
                     "🔄⬜ 목표 달성 | ⬜⬜ 좋은 프롬프트 | ⬜⬜ 새로 배운 것\n\n"
-                    "안녕하세요! 데이터 분석 과정을 돌아보며 함께 반성해볼까요? 🪞\n"
+                    "안녕하세요! 데이터 분석 과정을 돌아보며 함께 성찰해볼까요? 🪞\n"
                     "먼저, 이번 데이터 분석을 통해 분석 목표를 어느 정도 달성하셨나요?"
                 ))],
                 "phase": "reflection",
@@ -1328,14 +1368,14 @@ def reflection_node(state: LearningAgentState):
             return {
                 "messages": [AIMessage(content=(
                     "원하시면 '요약'이라고 답해 실행 대화를 정리해드릴게요. "
-                    "바로 진행하려면 '반성'이라고 답해주세요."
+                    "바로 진행하려면 '성찰'이라고 답해주세요."
                 ))],
                 "phase": "reflection",
                 "waiting_for_input": True,
                 "awaiting_reflection_start_choice": True
             }
 
-    # 요약 완료 후 또는 요약 스킵 후: 반성 수집 진행
+    # 요약 완료 후 또는 요약 스킵 후: 성찰 수집 진행
     # reflection 단계 메시지만 필터링해서 전달
     phase_end_indices = state.get("phase_end_indices")
     reflection_messages = get_phase_messages(state["messages"], "reflection", phase_end_indices)
@@ -1365,20 +1405,20 @@ def reflection_node(state: LearningAgentState):
         
         # ✅ 6개 수집 완료 패턴 시 자동 완료 처리 (3개 항목 × 2턴)
         if response.content.count("✅") >= 6:
-            # 대화 내역에서 반성 정보 추출
+            # 대화 내역에서 성찰 정보 추출
             info = extract_reflection_info_from_conversation(state)
 
             # ReflectionCriteria 도구 호출을 위한 AIMessage 생성
             llm = ChatOpenAI(model=BASE_LLM_MODEL, temperature=0)
             llm_with_tools = llm.bind_tools([ReflectionCriteria])
-            sys = SystemMessage(content=f"""사용자가 반성 단계를 완료했습니다. 다음 정보를 ReflectionCriteria로 제출하세요:
+            sys = SystemMessage(content=f"""사용자가 성찰 단계를 완료했습니다. 다음 정보를 ReflectionCriteria로 제출하세요:
 목표 달성 여부: {info.get('goal_achievement','정보 없음')}
 좋은 프롬프트: {info.get('best_prompt','정보 없음')}
 새로 배운 것: {info.get('new_learning','정보 없음')}""")
             tool_call_msg = llm_with_tools.invoke([sys] + state.get("messages", [])[-5:])
 
             # -------------------------------------------------
-            # DynamoDB에 최종 반성 안내/정리 메시지(response) 저장
+            # DynamoDB에 최종 성찰 안내/정리 메시지(response) 저장
             # -------------------------------------------------
             try:
                 import streamlit as st
@@ -1398,7 +1438,7 @@ def reflection_node(state: LearningAgentState):
                         turn=current_turn,
                     )
             except Exception as e:
-                print(f"[reflection_node] 최종 반성 메시지 저장 실패: {e}")
+                print(f"[reflection_node] 최종 성찰 메시지 저장 실패: {e}")
 
             return {
                 "messages": [response, tool_call_msg],
@@ -1444,7 +1484,7 @@ JSON으로만 반환:
         return {}
 
 def finalize_reflection(state: LearningAgentState):
-    """반성 단계 완료 처리"""
+    """성찰 단계 완료 처리"""
     messages = state.get("messages", [])
     
     # 안전성 검사
@@ -1488,7 +1528,7 @@ def finalize_reflection(state: LearningAgentState):
         phase_end_indices = {**existing_indices, "reflection": current_msg_count}
 
         # -------------------------------------------------
-        # DynamoDB에 반성 완료 안내 메시지 저장
+        # DynamoDB에 성찰 완료 안내 메시지 저장
         # -------------------------------------------------
         try:
             import streamlit as st
@@ -1499,7 +1539,7 @@ def finalize_reflection(state: LearningAgentState):
             )
             if conversation_id and message_manager:
                 current_turn = st.session_state.get("learning_turn")
-                completion_text = "학습 반성이 완료되었습니다! 수고하셨습니다."
+                completion_text = "학습 성찰이 완료되었습니다! 수고하셨습니다."
                 message_manager.save_message(
                     conversation_id=conversation_id,
                     role="assistant",
@@ -1514,7 +1554,7 @@ def finalize_reflection(state: LearningAgentState):
         return {
             "messages": [
                 ToolMessage(
-                    content="학습 반성이 완료되었습니다! 수고하셨습니다.",
+                    content="학습 성찰이 완료되었습니다! 수고하셨습니다.",
                     tool_call_id=tool_call.get("id", "unknown"),
                 )
             ],
@@ -1556,7 +1596,7 @@ def generate_summary(state: LearningAgentState):
 - 🎯 데이터 분석 목표: {planning_info.get('data_analysis_objective', 'N/A')}
 - 📋 데이터 분석 계획: {plan_display}
 
-【반성 단계】
+【성찰 단계】
 - 🎯 목표 달성 여부: {reflection_info.get('goal_achievement', 'N/A')}
 - 👍 좋은 프롬프트: {reflection_info.get('best_prompt', 'N/A')}
 - 💡 새롭게 배운 것: {reflection_info.get('new_learning', 'N/A')}
@@ -1660,8 +1700,8 @@ def route_initial(state) -> Literal["planning", "execution", "reflection", "summ
                 # 선택 대기 상태에서 요약 선택 → summarize_execution으로
                 if any(k in t for k in ["요약", "요약해줘", "요약 시작", "요약 생성", "정리", "보여줘"]):
                     return "summarize_execution"
-                # 선택 대기 상태에서 반성 진행 선택 → reflection으로 (요약 스킵)
-                if any(k in t for k in ["반성", "반성 진행", "바로", "진행", "시작", "반성 시작"]):
+                # 선택 대기 상태에서 성찰 진행 선택 → reflection으로 (요약 스킵)
+                if any(k in t for k in ["성찰", "성찰 진행", "바로", "진행", "시작", "성찰 시작"]):
                     # summary_generated를 True로 설정하여 요약 단계 스킵
                     # (하지만 route_initial에서는 state를 직접 수정할 수 없으므로 reflection_node에서 처리)
                     return "reflection"
@@ -1754,7 +1794,7 @@ def route_from_execution(state):
     return END
 
 def route_from_reflection(state) -> Literal["finalize_reflection"]:
-    """반성 단계에서의 라우팅"""
+    """성찰 단계에서의 라우팅"""
     messages = state.get("messages", [])
     
     if not messages:
