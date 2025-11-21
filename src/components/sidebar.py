@@ -280,7 +280,6 @@ def render_conversation_history_preprocessing(s3_manager: S3Manager, conversatio
 #--------------------------------#
 #      LLM 체인 생성 함수          #
 #--------------------------------#
-##TODO 추후 SRL_Agent 로직 적용
 
 class InMemoryHistory(BaseChatMessageHistory, BaseModel):
     """In memory implementation of chat message history."""
@@ -379,8 +378,6 @@ def render_chat_interface():
         with messages.chat_message("assistant"):
             # 빈 공간(컨테이너)을 만들어서, 여기에 토큰을 스트리밍 출력한다.
             container = st.empty()
-            #TODO 추후 비동기 처리 적용
-            #TODO 추후 에러 처리 적용
             try:
                 generator = conv_chain.stream(
                     {

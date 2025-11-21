@@ -1,19 +1,20 @@
-from langchain.tools import tool
-from typing import Annotated, Optional
-from langchain_experimental.tools.python.tool import PythonAstREPLTool
+import os
 import pandas as pd
 import numpy as np
 import seaborn as sns
+import streamlit as st
+import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
+
+from typing import Annotated, Optional
+
+from langchain.tools import tool
+from langchain_experimental.tools.python.tool import PythonAstREPLTool
 from langchain_core.prompts import ChatPromptTemplate, load_prompt
 from langchain_openai import ChatOpenAI
 from langchain.agents import create_tool_calling_agent, AgentExecutor
 from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.runnables.history import RunnableWithMessageHistory
-from dotenv import load_dotenv
-import matplotlib.pyplot as plt
-import matplotlib.font_manager as fm
-import os
-import streamlit as st
 
 
 ########################################################
@@ -72,9 +73,9 @@ class DataAnalysisAgent:
     def __init__(
         self,
         dataframe: pd.DataFrame,
-        model_name: str = "gpt-4o",
+        model_name: str = "gpt-4.1",
         api_key: str = os.environ["OPENAI_API_KEY"],
-        temperature: float = 1.0,
+        temperature: float = 0.2,  # 변경: 1.0 → 0.2
         prefix_prompt: Optional[str] = None,
         postfix_prompt: Optional[str] = None,
         column_guideline: Optional[str] = None,
@@ -162,33 +163,53 @@ class DataAnalysisAgent:
                 # 마이너스 폰트 깨짐 방지
                 plt.rcParams["axes.unicode_minus"] = False
 
+                # ========================================
+                # 개선 2: 공유 도구 상태 관리
+                # ========================================
                 # 공유 도구가 있으면 사용, 없으면 새로 생성
                 if self.shared_python_tool:
                     python_tool = self.shared_python_tool
+
                     # df가 현재 도구의 locals에 없으면 추가
                     if 'df' not in python_tool.locals:
                         python_tool.locals['df'] = self.df
                     if 'df_UploadData' not in python_tool.locals:
                         python_tool.locals['df_UploadData'] = self.df
-                    python_tool.locals['sns'] = sns
-                    python_tool.locals['plt'] = plt
-                    python_tool.locals['np'] = np
-                    python_tool.locals['pd'] = pd
+                    
+                    # 필수 라이브러리는 덮어쓰지 않고 없을 때만 추가
+                    if 'sns' not in python_tool.locals:
+                        python_tool.locals['sns'] = sns
+                    if 'plt' not in python_tool.locals:
+                        python_tool.locals['plt'] = plt
+                    if 'np' not in python_tool.locals:
+                        python_tool.locals['np'] = np
+                    if 'pd' not in python_tool.locals:
+                        python_tool.locals['pd'] = pd
                 else:
                     python_tool = PythonAstREPLTool(
                         locals={"df": self.df, "df_UploadData": self.df, "sns": sns, "plt": plt, "np": np, "pd": pd}
                     )
 
+                # ========================================
+                # 개선: UI 표시용 상태만 초기화
+                # ========================================
+                # 이전 실행의 UI 결과가 다음 실행에 표시되지 않도록
+                st.session_state['last_result_df'] = None
+                
+                # 코드 실행
                 result = python_tool.invoke(code)
 
-                # 실행 후 locals를 다시 확인하여 result_df 캡처
-                # result_df 또는 result로 명명된 변수 찾기
-                for var_name in ['result_df', 'result', 'output_df', 'final_df']:
+                # ========================================
+                # 개선: result_df 캡처 로직 (우선순위 기반)
+                # ========================================
+                # 실행 후 결과 변수 찾기 (우선순위 순서)
+                result_var_priority = ['result_df', 'result', 'output_df', 'final_df']
+
+                for var_name in result_var_priority:
                     if var_name in python_tool.locals:
                         var_value = python_tool.locals[var_name]
                         if isinstance(var_value, (pd.DataFrame, pd.Series)):
-                            if 'last_result_df' not in st.session_state:
-                                st.session_state['last_result_df'] = None
+                            # UI에 표시할 결과만 세션 상태에 저장
                             st.session_state['last_result_df'] = var_value
                             print(f"[DataAnalysisAgent] result_df saved to session state: shape={var_value.shape if hasattr(var_value, 'shape') else len(var_value)}")                        
                             break
@@ -231,7 +252,7 @@ class DataAnalysisAgent:
 
     def build_system_prompt(self):
 
-        system_prompt = load_prompt("src/prompts/data-analysis-V02.yaml", encoding="utf-8")
+        system_prompt = load_prompt("src/prompts/data-analysis-V03.yaml", encoding="utf-8")
         system_prompt = system_prompt.format(
             dataframe_head=self.df.head().to_string(),
             column_guideline=self.column_guideline,
@@ -264,7 +285,7 @@ class DataAnalysisAgent:
             agent=agent,
             tools=self.tools,
             verbose=True,
-            max_iterations=20,
+            max_iterations=10,  # 변경: 20 → 10
             max_execution_time=60,
             handle_parsing_errors=True,
         )

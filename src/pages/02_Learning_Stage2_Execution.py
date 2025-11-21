@@ -22,6 +22,7 @@ from queue import Queue, Empty
 
 from langchain_teddynote import logging
 from langchain_experimental.tools import PythonAstREPLTool
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from openai import OpenAIError, InternalServerError
 
 # 프로젝트 루트를 path에 추가
@@ -31,7 +32,6 @@ sys.path.insert(0, str(project_root))
 from src.graph.learning_agent import LearningAgentRunner
 from src.graph.sidebars import render_learning_sidebar
 from src.graph.utils import get_phase_messages, get_thread_specific_key
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from src.graph.learning_logging import ensure_learning_conversation
 
 from src.components.dynamo import (
@@ -41,6 +41,7 @@ from src.components.dynamo import (
     MessageManager,
     AgencyConversationManager,
 )
+from src.components.dataanalysis import DataAnalysisAgent
 from src.components.dataclass import MessageRole, MessageType
 from src.components.llm import set_openai_api_key, handle_openai_error
 from src.prompts.agent_prompts import AGENT_PREFIX_PROMPT, AGENT_POSTFIX_PROMPT
@@ -331,7 +332,6 @@ def create_agent(
     shared_python_tool = None,
 ):
     """데이터프레임 에이전트 생성"""
-    from src.components.dataanalysis import DataAnalysisAgent
 
     if selected_model is None:
         selected_model = st.session_state.get("model_option_general", "gpt-4.1-mini")
@@ -1197,10 +1197,10 @@ def main():
         elif current_phase == "execution":
             if execution_completed:
                 st.success("✅ 실행 단계가 완료되었습니다!")
-                st.info("👈️ 좌측 사이드바에서 'Stage 3: 반성'으로 이동하세요")
+                st.info("👈️ 좌측 사이드바에서 'Stage 3: 성찰'로 이동하세요")
         elif current_phase == "reflection":
             st.success("✅ 실행 단계가 완료되었습니다!")
-            st.info("👈️ 좌측 사이드바에서 'Stage 3: 반성'으로 이동하세요")
+            st.info("👈️ 좌측 사이드바에서 'Stage 3: 성찰'로 이동하세요")
         
         st.divider()
 

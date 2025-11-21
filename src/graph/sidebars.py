@@ -5,7 +5,7 @@ Learning Agent 사이드바 공통 모듈
 import streamlit as st
 from src.graph.learning_agent import LearningAgentRunner
 from src.graph.utils import get_phase_messages, get_thread_specific_key
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from src.components.dataclass import MessageRole, MessageType
 from src.graph.learning_logging import load_learning_threads_for_user
 
@@ -148,7 +148,7 @@ def render_execution_sidebar_chat(agent: LearningAgentRunner, state):
     # 완료 상태 확인 및 안내 / 버튼
     if execution_completed:
         st.success("✅ 실행 단계가 완료되었습니다!")
-        st.info("'Stage 3: 반성'으로 이동하세요")
+        st.info("'Stage 3: 성찰'로 이동하세요")
     else:
         # 안내 및 완료 버튼
         st.info("💡 메인 화면에서 질문하면, 위 대화 영역에 AI 에이전트의 조언이 자동으로 표시됩니다.")

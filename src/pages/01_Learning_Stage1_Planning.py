@@ -161,20 +161,12 @@ def main():
             # 사용자 입력
             st.subheader("메시지 입력")
             
-            user_input = st.text_area(
-                "메시지를 입력하세요:",
+            user_input = st.chat_input(
+                placeholder="AI 에이전트의 질문에 답해주세요...",
                 key="planning_input",
-                placeholder="튜터의 질문에 답해주세요...",
-                height=80
             )
-            
-            col1, col2 = st.columns([1, 4])
-            
-            with col1:
-                send_button = st.button("📤 전송", type="primary", use_container_width=True)
-            
-            if send_button and user_input.strip():
-                # DynamoDB에 사용자 입력 로그 저장 (Stage 1 - planning)
+
+            if user_input:
                 try:
                     # 턴 번호 증가
                     if "learning_turn" not in st.session_state:
@@ -198,10 +190,9 @@ def main():
                     print(f"[Stage1] 사용자 입력 로그 저장 실패: {e}")
 
                 with st.spinner("응답 생성 중..."):
-                    result = agent.send_message(user_input)
+                    _ = agent.send_message(user_input)
                 st.rerun()
-            elif send_button:
-                st.warning("메시지를 입력해주세요")
+
 
 if __name__ == "__main__":
     main()
