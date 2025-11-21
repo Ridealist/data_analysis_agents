@@ -86,7 +86,7 @@ def main():
         st.warning("⚠️ Stage 2: 실행을 먼저 완료하세요")
         st.info("👈 좌측 사이드바에서 'Stage 2: 실행'으로 이동하세요")
         
-        ##TODO 배포시 삭제: 테스트 모드 추가
+        ## TODO 배포시 삭제: 테스트 모드 추가
         # st.divider()
         # st.subheader("🧪 개발/테스트 모드")
         # st.caption("Stage 1, 2를 건너뛰고 Stage 3을 바로 테스트할 수 있습니다.")
