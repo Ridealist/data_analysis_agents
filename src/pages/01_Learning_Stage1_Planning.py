@@ -117,16 +117,16 @@ def main():
         planning_completed = state.get("planning_completed", False)
         
         # TODO: 배포 시 삭제 - Stage 2 테스트 모드 (Stage 1 건너뛰기)
-        if not planning_completed:
-            st.divider()
-            st.subheader("🧪 개발/테스트 모드")
-            st.caption("Stage 1을 건너뛰고 Stage 2를 바로 테스트할 수 있습니다.")
+        # if not planning_completed:
+        #     st.divider()
+        #     st.subheader("🧪 개발/테스트 모드")
+        #     st.caption("Stage 1을 건너뛰고 Stage 2를 바로 테스트할 수 있습니다.")
             
-            if st.button("🚀 Stage 2 테스트 모드로 시작", type="secondary"):
-                with st.spinner("테스트 환경 설정 중..."):
-                    agent.setup_test_execution_stage()
-                st.success("✅ Stage 2 테스트 환경이 설정되었습니다!")
-                st.info("👈 상단 메뉴에서 'Stage 2: 실행' 페이지로 이동해 테스트를 진행하세요.")
+        #     if st.button("🚀 Stage 2 테스트 모드로 시작", type="secondary"):
+        #         with st.spinner("테스트 환경 설정 중..."):
+        #             agent.setup_test_execution_stage()
+        #         st.success("✅ Stage 2 테스트 환경이 설정되었습니다!")
+        #         st.info("👈 상단 메뉴에서 'Stage 2: 실행' 페이지로 이동해 테스트를 진행하세요.")
         
         # 사용자 입력에서 '계획 수정' 확인 의도 체크 (시스템 레벨 처리)
         if messages and isinstance(messages[-1], HumanMessage):
