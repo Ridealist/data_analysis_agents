@@ -87,15 +87,15 @@ def main():
         st.info("👈 좌측 사이드바에서 'Stage 2: 실행'으로 이동하세요")
         
         ##TODO 배포시 삭제: 테스트 모드 추가
-        # st.divider()
-        # st.subheader("🧪 개발/테스트 모드")
-        # st.caption("Stage 1, 2를 건너뛰고 Stage 3을 바로 테스트할 수 있습니다.")
+        st.divider()
+        st.subheader("🧪 개발/테스트 모드")
+        st.caption("Stage 1, 2를 건너뛰고 Stage 3을 바로 테스트할 수 있습니다.")
         
-        # if st.button("🚀 Stage 3 테스트 모드로 시작", type="secondary"):
-        #     with st.spinner("테스트 환경 설정 중..."):
-        #         agent.setup_test_reflection_stage()
-        #     st.success("✅ 테스트 환경이 설정되었습니다!")
-        #     st.rerun()
+        if st.button("🚀 Stage 3 테스트 모드로 시작", type="secondary"):
+            with st.spinner("테스트 환경 설정 중..."):
+                agent.setup_test_reflection_stage()
+            st.success("✅ 테스트 환경이 설정되었습니다!")
+            st.rerun()
     else:
         current_phase = state.get("phase", "reflection")
         reflection_completed = state.get("reflection_completed", False)
@@ -197,19 +197,12 @@ def main():
             # 도움말
             st.info("💡 **Tip:** 솔직하게 자신의 학습 과정을 돌아보세요. 실패와 시행착오도 중요한 학습입니다!")
             
-            user_input = st.text_area(
-                "메시지를 입력하세요:",
-                key="reflection_input",
-                placeholder="튜터의 질문에 답해주세요...",
-                height=80
+            user_input = st.chat_input(
+                placeholder="AI 에이전트의 질문에 답해주세요...",
+                key="reflection_input"
             )
             
-            col1, col2 = st.columns([1, 4])
-            
-            with col1:
-                send_button = st.button("📤 전송", type="primary", use_container_width=True)
-            
-            if send_button and user_input.strip():
+            if user_input:
                 # 1) 턴 번호 증가 (Stage1/2와 공통 카운터)
                 if "learning_turn" not in st.session_state:
                     st.session_state["learning_turn"] = 0
@@ -235,11 +228,9 @@ def main():
 
                 # 3) 기존 LearningAgent 호출
                 with st.spinner("응답 생성 중..."):
-                    result = agent.send_message(user_input)
+                    _ = agent.send_message(user_input)
                 st.rerun()
-            elif send_button:
-                st.warning("메시지를 입력해주세요")
+
 
 if __name__ == "__main__":
     main()
-

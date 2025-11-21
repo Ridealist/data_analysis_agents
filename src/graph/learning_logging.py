@@ -1,5 +1,6 @@
 import streamlit as st
 from typing import Optional, Tuple, List, Dict
+from datetime import timezone, timedelta
 
 from src.components.dynamo import (
     DynamoDBManager,
@@ -139,7 +140,10 @@ def load_learning_threads_for_user() -> List[Dict]:
         if created_at is not None:
             try:
                 dt = timestamp_to_datetime(created_at)
-                created_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+                # UTC로 간주하고 KST(UTC+9)로 변환
+                dt_utc = dt.replace(tzinfo=timezone.utc)
+                dt_kst = dt_utc.astimezone(timezone(timedelta(hours=9)))
+                created_str = dt_kst.strftime("%Y-%m-%d %H:%M:%S")
             except Exception:
                 created_str = str(created_at)
 

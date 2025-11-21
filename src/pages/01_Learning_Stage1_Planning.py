@@ -117,16 +117,16 @@ def main():
         planning_completed = state.get("planning_completed", False)
         
         # TODO: 배포 시 삭제 - Stage 2 테스트 모드 (Stage 1 건너뛰기)
-        # if not planning_completed:
-        #     st.divider()
-        #     st.subheader("🧪 개발/테스트 모드")
-        #     st.caption("Stage 1을 건너뛰고 Stage 2를 바로 테스트할 수 있습니다.")
+        if not planning_completed:
+            st.divider()
+            st.subheader("🧪 개발/테스트 모드")
+            st.caption("Stage 1을 건너뛰고 Stage 2를 바로 테스트할 수 있습니다.")
             
-        #     if st.button("🚀 Stage 2 테스트 모드로 시작", type="secondary"):
-        #         with st.spinner("테스트 환경 설정 중..."):
-        #             agent.setup_test_execution_stage()
-        #         st.success("✅ Stage 2 테스트 환경이 설정되었습니다!")
-        #         st.info("👈 상단 메뉴에서 'Stage 2: 실행' 페이지로 이동해 테스트를 진행하세요.")
+            if st.button("🚀 Stage 2 테스트 모드로 시작", type="secondary"):
+                with st.spinner("테스트 환경 설정 중..."):
+                    agent.setup_test_execution_stage()
+                st.success("✅ Stage 2 테스트 환경이 설정되었습니다!")
+                st.info("👈 상단 메뉴에서 'Stage 2: 실행' 페이지로 이동해 테스트를 진행하세요.")
         
         # 사용자 입력에서 '계획 수정' 확인 의도 체크 (시스템 레벨 처리)
         if messages and isinstance(messages[-1], HumanMessage):
@@ -161,20 +161,12 @@ def main():
             # 사용자 입력
             st.subheader("메시지 입력")
             
-            user_input = st.text_area(
-                "메시지를 입력하세요:",
+            user_input = st.chat_input(
+                placeholder="AI 에이전트의 질문에 답해주세요...",
                 key="planning_input",
-                placeholder="튜터의 질문에 답해주세요...",
-                height=80
             )
-            
-            col1, col2 = st.columns([1, 4])
-            
-            with col1:
-                send_button = st.button("📤 전송", type="primary", use_container_width=True)
-            
-            if send_button and user_input.strip():
-                # DynamoDB에 사용자 입력 로그 저장 (Stage 1 - planning)
+
+            if user_input:
                 try:
                     # 턴 번호 증가
                     if "learning_turn" not in st.session_state:
@@ -198,10 +190,9 @@ def main():
                     print(f"[Stage1] 사용자 입력 로그 저장 실패: {e}")
 
                 with st.spinner("응답 생성 중..."):
-                    result = agent.send_message(user_input)
+                    _ = agent.send_message(user_input)
                 st.rerun()
-            elif send_button:
-                st.warning("메시지를 입력해주세요")
+
 
 if __name__ == "__main__":
     main()

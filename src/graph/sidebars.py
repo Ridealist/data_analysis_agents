@@ -5,7 +5,7 @@ Learning Agent 사이드바 공통 모듈
 import streamlit as st
 from src.graph.learning_agent import LearningAgentRunner
 from src.graph.utils import get_phase_messages, get_thread_specific_key
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from src.components.dataclass import MessageRole, MessageType
 from src.graph.learning_logging import load_learning_threads_for_user
 
