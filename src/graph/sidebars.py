@@ -283,6 +283,25 @@ def render_stage2_sidebar(agent: LearningAgentRunner, state: dict) -> None:
     render_execution_sidebar_chat(agent, state)
 
 
+def _sync_execution_summary_to_session(state: dict) -> None:
+    """
+    LangGraph state의 execution_summary를 session_state로 동기화 (변경 시에만).
+    스레드별로 독립적인 키를 사용하여 멀티 스레드 환경을 지원합니다.
+    """
+    latest = state.get("execution_summary")
+    if not latest:
+        return
+
+    # 스레드별 키 생성
+    display_key = get_thread_specific_key("sidebar_execution_summary")
+    last_key = get_thread_specific_key("_last_execution_summary")
+
+    # 새로 생성되었거나 변경된 경우에만 덮어쓰기
+    if st.session_state.get(last_key) != latest:
+        st.session_state[display_key] = latest
+        st.session_state[last_key] = latest
+
+
 def render_stage3_sidebar(agent: LearningAgentRunner, state: dict) -> None:
     """Stage 3 (Reflection) 사이드바 - 실행 단계 대화 요약 표시."""
     st.header("📊 실행 단계 대화 요약")
@@ -290,15 +309,20 @@ def render_stage3_sidebar(agent: LearningAgentRunner, state: dict) -> None:
     execution_summary = state.get("execution_summary", "")
     placeholder_text = "('요약' 키워드를 입력하면 Stage 2에서 데이터 분석하면서 진행한 대화 요약본이 생성됩니다.)"
 
-    # 요약이 있으면 내용 표시, 없으면 placeholder 표시
-    display_value = execution_summary if execution_summary else placeholder_text
+    # 스레드별 키 생성
+    thread_id = st.session_state.get("learning_thread_id", "")
+    display_key = get_thread_specific_key("sidebar_execution_summary", thread_id)
+
+    # 동기화 함수 호출 (Stage 1과 동일한 패턴)
+    if execution_summary:
+        _sync_execution_summary_to_session(state)
 
     st.text_area(
         "Stage 2에서 진행된 대화 내용",
-        value=display_value,
+        placeholder=placeholder_text if not execution_summary else None,
         height=400,
         disabled=True,  # 항상 비활성화 (수정 불가)
-        key="sidebar_execution_summary",
+        key=display_key,  # 스레드별 키 사용
         label_visibility="collapsed",
     )
 
