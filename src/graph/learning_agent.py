@@ -5,6 +5,7 @@ import re
 import json
 from typing import TypedDict, Dict, Optional, Literal, Annotated, List
 from pydantic import BaseModel
+from enum import Enum
 
 from langchain_core.messages import SystemMessage, AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool  # 추가
@@ -1028,9 +1029,7 @@ def ensure_serializable(value):
     
     Returns:
         msgpack 직렬화 가능한 형태 (기본 타입만)
-    """
-    from enum import Enum
-    
+    """    
     if isinstance(value, Enum):
         return value.name  # Enum → str (예: TutorAct.SE_ACKNOWLEDGE → "SE_ACKNOWLEDGE")
     
@@ -1069,7 +1068,6 @@ def call_agency_tutor_safely(
     """
     from src.agency.Tutor import AgencyTutor
     from src.agency.prompts.TutorActTaxonomy import TutorAct
-    from enum import Enum
     
     # Enum으로 역직렬화 (AgencyTutor는 Enum 리스트를 기대)
     def deserialize_intent(value):
