@@ -847,8 +847,6 @@ def planning_complete_confirmation(state: LearningAgentState):
         if not response.tool_calls:
             print("⚠️ LLM이 tool_calls를 생성하지 못함. 수동으로 진행합니다.")
             # 수동으로 AIMessage with tool_calls 생성
-            from langchain_core.messages import AIMessage
-            import uuid
             
             tool_call_id = str(uuid.uuid4())
             forced_response = AIMessage(
